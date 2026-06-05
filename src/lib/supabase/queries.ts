@@ -229,10 +229,19 @@ export async function getUploadStatus(filingPeriodId: string): Promise<UploadSta
 
   const { data: files } = await supabase
     .from("uploaded_files")
-    .select("kind")
-    .eq("session_id", session.id);
+    .select("kind, original_filename")
+    .eq("session_id", session.id)
+    .order("created_at", { ascending: false });
 
-  const documents = files?.filter((f) => f.kind === "document").length ?? 0;
+  const seenDocNames = new Set<string>();
+  let documents = 0;
+  for (const file of files ?? []) {
+    if (file.kind !== "document") continue;
+    const key = file.original_filename.toLowerCase();
+    if (seenDocNames.has(key)) continue;
+    seenDocNames.add(key);
+    documents += 1;
+  }
   const bank = files?.filter((f) => f.kind === "bank").length ?? 0;
 
   const { count: recordCount } = await supabase
@@ -247,6 +256,52 @@ export async function getUploadStatus(filingPeriodId: string): Promise<UploadSta
     sessionStatus: session.status,
     hasProcessed: (recordCount ?? 0) > 0,
   };
+}
+
+export type ReviewMessage = {
+  id?: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+};
+
+export async function getReviewMessages(filingPeriodId: string): Promise<ReviewMessage[]> {
+  const supabase = supabaseRequired();
+
+  const { data, error } = await supabase
+    .from("review_messages")
+    .select("id, role, content")
+    .eq("filing_period_id", filingPeriodId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    role: row.role as ReviewMessage["role"],
+    content: row.content,
+  }));
+}
+
+export async function saveReviewMessage(
+  filingPeriodId: string,
+  role: ReviewMessage["role"],
+  content: string,
+): Promise<string | null> {
+  const supabase = supabaseRequired();
+
+  const { data, error } = await supabase
+    .from("review_messages")
+    .insert({ filing_period_id: filingPeriodId, role, content })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data.id;
 }
 
 export type ReviewDocument = {
@@ -313,7 +368,7 @@ export async function getReviewData(filingPeriodId: string): Promise<ReviewData 
         "id, document_type, counterparty_name, invoice_date, gross_amount, vat_rate, vat_amount, confidence, warning, file_id",
       )
       .eq("filing_period_id", filingPeriodId)
-      .order("invoice_date", { ascending: false }),
+      .order("created_at", { ascending: false }),
     supabase
       .from("bank_transactions")
       .select("id, transaction_date, amount, description, counterparty, reconciliation_status")
@@ -339,19 +394,25 @@ export async function getReviewData(filingPeriodId: string): Promise<ReviewData 
     (matchedIds ?? []).map((row) => row.matched_document_id).filter(Boolean),
   );
 
-  const documents: ReviewDocument[] = (records ?? []).map((row) => ({
-    id: row.id,
-    filename: filenameByFileId.get(row.file_id) ?? "unknown",
-    documentType: row.document_type,
-    counterparty: row.counterparty_name,
-    invoiceDate: row.invoice_date,
-    grossAmount: row.gross_amount != null ? Number(row.gross_amount) : null,
-    vatRate: row.vat_rate != null ? Number(row.vat_rate) : null,
-    vatAmount: row.vat_amount != null ? Number(row.vat_amount) : null,
-    confidence: row.confidence,
-    warning: row.warning,
-    matched: matchedDocIds.has(row.id),
-  }));
+  const seenFileIds = new Set<string>();
+  const documents: ReviewDocument[] = [];
+  for (const row of records ?? []) {
+    if (seenFileIds.has(row.file_id)) continue;
+    seenFileIds.add(row.file_id);
+    documents.push({
+      id: row.id,
+      filename: filenameByFileId.get(row.file_id) ?? "unknown",
+      documentType: row.document_type,
+      counterparty: row.counterparty_name,
+      invoiceDate: row.invoice_date,
+      grossAmount: row.gross_amount != null ? Number(row.gross_amount) : null,
+      vatRate: row.vat_rate != null ? Number(row.vat_rate) : null,
+      vatAmount: row.vat_amount != null ? Number(row.vat_amount) : null,
+      confidence: row.confidence,
+      warning: row.warning,
+      matched: matchedDocIds.has(row.id),
+    });
+  }
 
   const unmatchedBank: ReviewBankLine[] = (bank ?? [])
     .filter((row) => row.reconciliation_status !== "matched")
@@ -378,7 +439,12 @@ export async function getReviewData(filingPeriodId: string): Promise<ReviewData 
       documents: documents.length,
       bankLines: bank?.length ?? 0,
       matched: matchedDocIds.size,
-      needsReview: documents.filter((d) => d.confidence === "review" || d.confidence === "do_not_deduct").length,
+      needsReview: documents.filter(
+        (d) =>
+          d.confidence === "review" ||
+          d.confidence === "do_not_deduct" ||
+          d.grossAmount == null,
+      ).length,
     },
   };
 }

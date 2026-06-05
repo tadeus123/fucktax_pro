@@ -221,7 +221,7 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
           {processing
             ? "processing documents & bank…"
             : alreadyProcessed
-              ? "View review"
+              ? "Open chat"
               : "Continue"}
         </button>
       ) : (

@@ -67,7 +67,7 @@ export function Sidebar({ filings }: { filings: SidebarFiling[] }) {
               href={filing.href}
               label={filing.label}
               deadline={filing.deadline}
-              active={pathname === filing.href}
+              active={pathname === filing.href || pathname.startsWith(`${filing.href}/`)}
             />
           ))}
         </div>

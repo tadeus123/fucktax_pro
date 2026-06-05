@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "inspect:uploads": "node scripts/inspect-uploads.mjs"
+    "inspect:uploads": "node scripts/inspect-uploads.mjs",
+    "inspect:chats": "node scripts/inspect-chats.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",

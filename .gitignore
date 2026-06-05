@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# exported chat logs for Cursor analysis (npm run inspect:chats)
+/diagnostics/

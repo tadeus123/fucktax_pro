@@ -18,5 +18,5 @@ export default async function VatReviewPage({ params }: { params: Promise<{ id: 
     notFound();
   }
 
-  return <ReviewView data={review} filingRoute={id} />;
+  return <ReviewView data={review} filingRoute={id} filingPeriodId={filing.id} />;
 }
