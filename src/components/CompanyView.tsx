@@ -1,4 +1,37 @@
-import { COMPANY, COMPANY_NOTES } from "@/lib/company";
+import { COMPANY, COMPANY_NOTES, type CompanyNote } from "@/lib/company";
+
+function Section({ note }: { note: CompanyNote }) {
+  const textLines = note.lines.filter((line) => line.kind === "text");
+  const dataLines = note.lines.filter((line) => line.kind === "data");
+
+  return (
+    <section>
+      <h2 className="mb-3 text-[10px] uppercase tracking-wider text-zinc-700">
+        {note.title}
+      </h2>
+
+      {textLines.length > 0 ? (
+        <div className="space-y-2">
+          {textLines.map((line, i) => (
+            <p key={i} className="text-sm leading-relaxed text-zinc-100">
+              {line.value}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {dataLines.length > 0 ? (
+        <div className={`space-y-1 ${textLines.length > 0 ? "mt-4" : ""}`}>
+          {dataLines.map((line, i) => (
+            <p key={i} className="text-[13px] text-zinc-600">
+              {line.value}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 export function CompanyView() {
   return (
@@ -11,24 +44,7 @@ export function CompanyView() {
 
         <div className="space-y-10">
           {COMPANY_NOTES.map((note) => (
-            <section key={note.title}>
-              <h2 className="mb-3 text-[10px] uppercase tracking-wider text-zinc-700">
-                {note.title}
-              </h2>
-              <div className="space-y-2">
-                {note.lines.map((line, i) =>
-                  line.kind === "text" ? (
-                    <p key={i} className="text-sm leading-relaxed text-zinc-400">
-                      {line.value}
-                    </p>
-                  ) : (
-                    <p key={i} className="text-[13px] text-zinc-600">
-                      {line.value}
-                    </p>
-                  ),
-                )}
-              </div>
-            </section>
+            <Section key={note.title} note={note} />
           ))}
         </div>
       </div>

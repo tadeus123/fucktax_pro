@@ -74,13 +74,13 @@ export const COMPANY_NOTES: CompanyNote[] = [
     title: "end of year",
     lines: [
       { kind: "text", value: "Balance sheet + profit/loss (Jahresabschluss)" },
-      { kind: "data", value: "Prepare by 30 Jun 2026" },
       { kind: "text", value: "Körperschaftsteuererklärung" },
       { kind: "text", value: "Gewerbesteuererklärung" },
       { kind: "text", value: "Annual VAT return (USt-Jahreserklärung)" },
+      { kind: "data", value: "Jahresabschluss · prepare by 30 Jun 2026" },
       {
         kind: "data",
-        value: "These three tax returns for 2025 · due 31 Jul 2026",
+        value: "KSt, GewSt, USt-Jahreserklärung · due 31 Jul 2026",
       },
     ],
   },
