@@ -37,7 +37,6 @@ export function VatAssistantChat({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const todoFileInputRef = useRef<HTMLInputElement>(null);
@@ -93,10 +92,6 @@ export function VatAssistantChat({
     }
     void load();
   }, [filingPeriodId]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [displayMessages, showActivity, todos.length]);
 
   const addTodo = useCallback(
     async (line: ParsedActionLine) => {
@@ -332,7 +327,6 @@ export function VatAssistantChat({
             {showActivity && activityLabel ? (
               <ChatActivityIndicator label={activityLabel} />
             ) : null}
-            <div ref={bottomRef} />
           </div>
         </div>
 
