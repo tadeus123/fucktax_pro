@@ -82,14 +82,6 @@ export const COMPANY_NOTES: CompanyNote[] = [
     ],
   },
   {
-    title: "what to do first",
-    lines: [
-      { kind: "text", value: "1. VAT filings (quarterly) — most urgent" },
-      { kind: "text", value: "2. Jahresabschluss 2025" },
-      { kind: "text", value: "3. Annual tax returns 2025 — by 31 Jul 2026" },
-    ],
-  },
-  {
     title: "bank",
     lines: [
       { kind: "data", value: "Finom · DE93 1001 8000 0392 6629 11" },
