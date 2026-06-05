@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { analyzeChatInteractions } from "@/lib/chat-analysis";
 import { logChatEvent, type ChatEventType } from "@/lib/chat-logger";
 import { createSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
 
     const filingPeriodId = request.nextUrl.searchParams.get("filingPeriodId")?.trim();
     const limit = Math.min(Number(request.nextUrl.searchParams.get("limit") ?? 500), 2000);
+    const analysisMode = request.nextUrl.searchParams.get("analysis") === "1";
 
     const supabase = createSupabaseAdmin();
 
@@ -74,14 +76,20 @@ export async function GET(request: NextRequest) {
       logsQuery = logsQuery.eq("filing_period_id", filingPeriodId);
     }
 
+    let turnsQuery = supabase
+      .from("chat_turns_summary")
+      .select("*")
+      .order("started_at", { ascending: false })
+      .limit(filingPeriodId ? 100 : 200);
+
+    if (filingPeriodId) {
+      turnsQuery = turnsQuery.eq("filing_period_id", filingPeriodId);
+    }
+
     const [{ data: logs, error: logsError }, { data: turns, error: turnsError }, { data: filings }] =
       await Promise.all([
         logsQuery,
-        supabase
-          .from("chat_turns_summary")
-          .select("*")
-          .order("started_at", { ascending: false })
-          .limit(filingPeriodId ? 100 : 200),
+        turnsQuery,
         supabase.from("filing_periods").select("id, label").order("sort_order"),
       ]);
 
@@ -102,6 +110,16 @@ export async function GET(request: NextRequest) {
     const filteredTurns = filingPeriodId
       ? (turns ?? []).filter((t) => t.filing_period_id === filingPeriodId)
       : turns;
+
+    if (analysisMode) {
+      const report = analyzeChatInteractions(
+        filteredTurns ?? [],
+        logs ?? [],
+        filings ?? [],
+        filingPeriodId ?? null,
+      );
+      return NextResponse.json(report);
+    }
 
     return NextResponse.json({
       exportedAt: new Date().toISOString(),
