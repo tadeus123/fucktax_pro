@@ -10,6 +10,12 @@ type ChatMessage = {
   content: string;
 };
 
+function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
+  const firstUserIndex = messages.findIndex((m) => m.role === "user");
+  if (firstUserIndex === -1) return [];
+  return messages.slice(firstUserIndex);
+}
+
 function renderMarkdownLite(text: string): ReactNode {
   const lines = text.split("\n");
   const nodes: ReactNode[] = [];
@@ -20,12 +26,12 @@ function renderMarkdownLite(text: string): ReactNode {
     if (tableRows.length === 0) return;
     const [header, ...body] = tableRows;
     nodes.push(
-      <div key={`table-${nodes.length}`} className="my-3 overflow-x-auto">
-        <table className="w-full text-left text-[12px]">
+      <div key={`table-${nodes.length}`} className="my-2 overflow-x-auto rounded-lg border border-zinc-800">
+        <table className="w-full text-left text-[13px]">
           <thead>
-            <tr className="border-b border-zinc-700 text-zinc-500">
+            <tr className="border-b border-zinc-800 bg-zinc-900/50 text-zinc-500">
               {header.map((cell, i) => (
-                <th key={i} className="px-2 py-1.5 font-normal">
+                <th key={i} className="px-3 py-2 font-normal">
                   {renderInline(cell.trim())}
                 </th>
               ))}
@@ -33,9 +39,9 @@ function renderMarkdownLite(text: string): ReactNode {
           </thead>
           <tbody>
             {body.map((row, ri) => (
-              <tr key={ri} className="border-b border-zinc-800/80">
+              <tr key={ri} className="border-b border-zinc-800/60 last:border-0">
                 {row.map((cell, ci) => (
-                  <td key={ci} className="px-2 py-1.5 text-zinc-300">
+                  <td key={ci} className="px-3 py-2 text-zinc-300">
                     {renderInline(cell.trim())}
                   </td>
                 ))}
@@ -54,14 +60,14 @@ function renderMarkdownLite(text: string): ReactNode {
     return segments.map((seg, i) => {
       if (seg.startsWith("**") && seg.endsWith("**")) {
         return (
-          <strong key={i} className="font-medium text-white">
+          <strong key={i} className="font-medium text-zinc-100">
             {seg.slice(2, -2)}
           </strong>
         );
       }
       if (seg.startsWith("`") && seg.endsWith("`")) {
         return (
-          <code key={i} className="rounded bg-zinc-800 px-1 text-[11px]">
+          <code key={i} className="rounded bg-zinc-800 px-1 text-[12px]">
             {seg.slice(1, -1)}
           </code>
         );
@@ -84,12 +90,9 @@ function renderMarkdownLite(text: string): ReactNode {
       continue;
     }
     if (inTable) flushTable();
-    if (line.trim() === "") {
-      nodes.push(<br key={`br-${li}`} />);
-      continue;
-    }
+    if (line.trim() === "") continue;
     nodes.push(
-      <p key={`p-${li}`} className={li > 0 ? "mt-2" : undefined}>
+      <p key={`p-${li}`} className={nodes.length > 0 ? "mt-3" : undefined}>
         {renderInline(line)}
       </p>,
     );
@@ -114,6 +117,8 @@ export function VatAssistantChat({
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+
+  const displayMessages = visibleMessages(messages);
 
   useEffect(() => {
     async function load() {
@@ -142,7 +147,7 @@ export function VatAssistantChat({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, sending]);
+  }, [displayMessages, sending]);
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
@@ -152,7 +157,6 @@ export function VatAssistantChat({
     setError("");
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
-    void logClientChatEvent(filingPeriodId, "client_quick_prompt", trimmed);
 
     try {
       const response = await fetch("/api/vat-assistant", {
@@ -197,7 +201,6 @@ export function VatAssistantChat({
     void logClientChatEvent(filingPeriodId, "client_upload", `${files.length} file(s)`, {
       documentCount: docFiles.length,
       bankCount: bankFiles.length,
-      filenames: files.map((f) => f.name).slice(0, 20),
     });
 
     try {
@@ -219,25 +222,8 @@ export function VatAssistantChat({
         });
       }
 
-      const userMsg = `I just uploaded ${stored} file(s) to this quarter. Process them and update ELSTER.`;
-      setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
-
-      const response = await fetch("/api/vat-assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filingPeriodId, message: userMsg }),
-      });
-      const body = (await response.json()) as {
-        error?: string;
-        reply?: string;
-        vatPayable?: number;
-        elsterUpdated?: boolean;
-      };
-      if (!response.ok) throw new Error(body.error ?? "Upload follow-up failed");
-      setMessages((prev) => [...prev, { role: "assistant", content: body.reply ?? "" }]);
-      if (body.elsterUpdated && body.vatPayable != null) {
-        onElsterUpdated?.({ vatPayable: body.vatPayable });
-      }
+      const userMsg = `Uploaded ${stored} file(s). Process and update ELSTER.`;
+      await sendMessage(userMsg);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -245,104 +231,45 @@ export function VatAssistantChat({
     }
   }
 
-  const quickPrompts = [
-    "Just make it work — clean up and build ELSTER",
-    "Most payments have no invoice — file cleanly",
-    "Yes, ignore wallet transfers",
-    "Cursor and Notion are reverse charge",
-  ];
-
-  async function runSmartDefaults() {
-    setSending(true);
-    setError("");
-    try {
-      const response = await fetch("/api/vat-assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filingPeriodId, action: "smart_defaults" }),
-      });
-      const body = (await response.json()) as {
-        error?: string;
-        reply?: string;
-        vatPayable?: number;
-      };
-      if (!response.ok) throw new Error(body.error ?? "Failed");
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", content: "Just make it work — clean up and build ELSTER" },
-        { role: "assistant", content: body.reply ?? "" },
-      ]);
-      if (body.vatPayable != null) onElsterUpdated?.({ vatPayable: body.vatPayable });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed");
-    } finally {
-      setSending(false);
-    }
-  }
-
   return (
-    <div className="flex h-full flex-col bg-black">
-      <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-        {loading ? (
-          <p className="mx-auto max-w-2xl text-sm text-zinc-600">Loading…</p>
-        ) : (
-          <div className="mx-auto max-w-2xl space-y-5 pb-4">
-            {messages.map((msg, index) => (
+    <div className="flex h-full flex-col">
+      <div className="flex-1 overflow-y-auto">
+        {!loading ? (
+          <div className="mx-auto max-w-2xl space-y-4 px-6 py-6">
+            {displayMessages.map((msg, index) => (
               <div
                 key={msg.id ?? index}
                 className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}
               >
-                <div
-                  className={
-                    msg.role === "user"
-                      ? "max-w-[88%] rounded-2xl rounded-br-sm bg-white px-4 py-2.5 text-[14px] leading-relaxed text-black"
-                      : "max-w-[100%] text-[14px] leading-relaxed text-zinc-300"
-                  }
-                >
-                  {msg.role === "assistant" ? renderMarkdownLite(msg.content) : msg.content}
-                </div>
+                {msg.role === "user" ? (
+                  <div className="max-w-[85%] rounded-2xl bg-zinc-100 px-4 py-2.5 text-[14px] leading-relaxed text-black">
+                    {msg.content}
+                  </div>
+                ) : (
+                  <div className="max-w-[92%] text-[14px] leading-relaxed text-zinc-300">
+                    {renderMarkdownLite(msg.content)}
+                  </div>
+                )}
               </div>
             ))}
             {sending || uploading ? (
-              <p className="text-sm text-zinc-600">{uploading ? "Uploading…" : "Thinking…"}</p>
+              <p className="text-[13px] text-zinc-600">{uploading ? "Uploading…" : "…"}</p>
             ) : null}
             <div ref={bottomRef} />
           </div>
-        )}
+        ) : null}
       </div>
 
-      {error ? (
-        <p className="mx-auto max-w-2xl px-4 pb-2 text-sm text-red-400">{error}</p>
-      ) : null}
+      {error ? <p className="px-6 pb-2 text-[13px] text-red-400">{error}</p> : null}
 
-      {!loading ? (
-        <div className="mx-auto flex w-full max-w-2xl flex-wrap gap-2 px-4 pb-3">
-          {quickPrompts.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              disabled={sending}
-              onClick={() =>
-                prompt.startsWith("Just make it work")
-                  ? void runSmartDefaults()
-                  : void sendMessage(prompt)
-              }
-              className="rounded-full border border-zinc-800 px-3 py-1.5 text-[12px] text-zinc-500 transition hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      <form
-        className="border-t border-zinc-900 bg-black p-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void sendMessage(input);
-        }}
-      >
-        <div className="mx-auto flex max-w-2xl gap-2">
+      <div className="shrink-0 px-6 pb-6 pt-2">
+        <form
+          className="mx-auto flex max-w-2xl items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void sendMessage(input);
+          }}
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -354,8 +281,8 @@ export function VatAssistantChat({
             type="button"
             disabled={loading || sending || uploading}
             onClick={() => fileInputRef.current?.click()}
-            className="shrink-0 rounded-xl border border-zinc-800 px-3 py-3 text-[12px] text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 disabled:opacity-40"
-            title="Upload documents or bank files to this filing"
+            className="flex h-9 w-9 shrink-0 items-center justify-center text-zinc-600 transition hover:text-zinc-400 disabled:opacity-40"
+            title="Add files"
           >
             +
           </button>
@@ -363,19 +290,19 @@ export function VatAssistantChat({
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Tell me what to exclude, confirm, or fix — I update ELSTER for you…"
+            placeholder="Message"
             disabled={loading || sending || uploading}
-            className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-[14px] text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 disabled:opacity-40"
+            className="h-9 flex-1 border-b border-zinc-800 bg-transparent px-1 text-[14px] text-white outline-none placeholder:text-zinc-700 focus:border-zinc-600 disabled:opacity-40"
           />
           <button
             type="submit"
             disabled={loading || sending || uploading || !input.trim()}
-            className="rounded-xl bg-white px-5 py-3 text-sm font-medium text-black disabled:opacity-40"
+            className="text-[13px] text-zinc-500 transition hover:text-white disabled:opacity-30"
           >
             Send
           </button>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }

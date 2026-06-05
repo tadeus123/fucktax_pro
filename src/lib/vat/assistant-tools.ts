@@ -96,6 +96,32 @@ export const ASSISTANT_TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "get_recovery_opportunities",
+      description:
+        "Get bank-first triage: which unmatched payments to ask user about (invoice upload) vs auto-file from bank (reverse charge, exclude). Use on first message or when user asks what is missing.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "search_filing_data",
+      description:
+        "Search unmatched bank lines and documents by substring (cursor, wallet, safeway). Call before exclude/confirm when you need counts or to verify a pattern.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: { type: "string", description: "Case-insensitive substring" },
+          scope: { type: "string", enum: ["bank", "documents", "both"], default: "both" },
+          limit: { type: "number", description: "Max rows per scope, default 25" },
+        },
+        required: ["pattern"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "apply_smart_defaults",
       description:
         "Auto-exclude wallet transfers, obvious US private retail, and similar — use when user says 'just make it work' or 'clean it up'.",

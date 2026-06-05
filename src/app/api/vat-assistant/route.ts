@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { logChatEvent, newChatTurnId } from "@/lib/chat-logger";
 import { VAT_ASSISTANT_SYSTEM_PROMPT } from "@/lib/vat/assistant-prompt";
-import { runAssistantWithTools } from "@/lib/vat/assistant-run";
+import { runAssistantWithTools, getAssistantModel } from "@/lib/vat/assistant-run";
 import { applySmartDefaults, refreshElsterExport } from "@/lib/vat/apply-actions";
-import { buildFilingContext, buildOpeningMessage } from "@/lib/vat/build-filing-context";
+import { buildFilingContext } from "@/lib/vat/build-filing-context";
 import {
   getReviewData,
   getReviewMessages,
@@ -28,22 +28,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Filing not found" }, { status: 404 });
   }
 
-  let messages = await getReviewMessages(filingPeriodId);
-
-  if (messages.length === 0) {
-    const opening = buildOpeningMessage(review);
-    const saved = await saveReviewMessage(filingPeriodId, "assistant", opening);
-    await logChatEvent({
-      filingPeriodId,
-      eventType: "system_opening",
-      role: "assistant",
-      content: opening,
-      metadata: { source: "first_load" },
-    });
-    messages = saved
-      ? [{ role: "assistant" as const, content: opening, id: saved }]
-      : [{ role: "assistant" as const, content: opening }];
-  }
+  const messages = await getReviewMessages(filingPeriodId);
 
   return NextResponse.json({ messages, stats: review.stats });
 }
@@ -101,7 +86,7 @@ export async function POST(request: NextRequest) {
         metadata: { vat_payable: refreshed.vatPayable, source: "smart_defaults" },
       });
 
-      const reply = `Applied smart defaults. ELSTER updated — VAT payable **${refreshed.vatPayable?.toFixed(2) ?? "?"} EUR**. Download ELSTER XML now.`;
+      const reply = `Done. VAT payable **${refreshed.vatPayable?.toFixed(2) ?? "?"} EUR**. Download ELSTER XML.`;
       await saveReviewMessage(filingPeriodId, "assistant", reply);
       await logChatEvent({
         filingPeriodId,
@@ -144,7 +129,7 @@ export async function POST(request: NextRequest) {
 
     const result = await runAssistantWithTools(
       `${VAT_ASSISTANT_SYSTEM_PROMPT}\n\n--- CURRENT FILING DATA ---\n${context}`,
-      history.filter((m) => m.role !== "system").slice(-20),
+      history.filter((m) => m.role !== "system").slice(-12),
       filingPeriodId,
     );
 
@@ -193,7 +178,7 @@ export async function POST(request: NextRequest) {
         elster_updated: result.elsterUpdated,
         vat_payable: result.vatPayable,
         tool_calls: result.toolCalls,
-        model: "gpt-4o",
+        model: getAssistantModel(),
       },
     });
 

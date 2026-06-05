@@ -1,3 +1,4 @@
+import { chatCompletionsWithRetry, getAssistantModel } from "@/lib/openai-client";
 import { ASSISTANT_TOOLS } from "@/lib/vat/assistant-tools";
 import { executeAssistantTool } from "@/lib/vat/apply-actions";
 
@@ -10,10 +11,6 @@ export type ToolCallLog = {
   ok: boolean;
 };
 
-function getOpenAiKey(): string | undefined {
-  return process.env.OPENAI_API_KEY?.trim();
-}
-
 export type AssistantRunResult = {
   reply: string;
   elsterUpdated: boolean;
@@ -22,14 +19,41 @@ export type AssistantRunResult = {
   toolDetails: ToolCallLog[];
 };
 
+function trimToolResultForModel(name: string, result: Record<string, unknown>): string {
+  if (name === "refresh_elster_export") {
+    return JSON.stringify({
+      ok: result.ok,
+      message: result.message,
+      vatPayable: result.vatPayable,
+      includedDocuments: result.includedDocuments,
+      excludedDocuments: result.excludedDocuments,
+      warnings: result.warnings,
+    });
+  }
+  if (name === "search_filing_data") {
+    return JSON.stringify(result);
+  }
+  if (name === "get_recovery_opportunities") {
+    return JSON.stringify({
+      ok: result.ok,
+      message: result.message,
+      askUser: result.askUser,
+      rcFromBank: result.rcFromBank,
+      unlinkedDocuments: result.unlinkedDocuments,
+    });
+  }
+  return JSON.stringify({
+    ok: result.ok,
+    message: result.message,
+    affected: result.affected,
+  });
+}
+
 export async function runAssistantWithTools(
   systemContent: string,
   history: Array<{ role: string; content: string }>,
   filingPeriodId: string,
 ): Promise<AssistantRunResult> {
-  const apiKey = getOpenAiKey();
-  if (!apiKey) throw new Error("OPENAI_API_KEY not configured");
-
   const messages: ChatMessage[] = [
     { role: "system", content: systemContent },
     ...history.map((m) => ({ role: m.role, content: m.content })),
@@ -42,24 +66,21 @@ export async function runAssistantWithTools(
   const maxRounds = 8;
 
   for (let round = 0; round < maxRounds; round += 1) {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        temperature: 0.2,
-        messages,
-        tools: ASSISTANT_TOOLS,
-        tool_choice: "auto",
-      }),
+    const response = await chatCompletionsWithRetry({
+      temperature: 0.2,
+      messages,
+      tools: ASSISTANT_TOOLS,
+      tool_choice: "auto",
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`OpenAI error: ${errText.slice(0, 200)}`);
+      if (response.status === 429) {
+        throw new Error(
+          "OpenAI rate limit — wait a few seconds and send again. (Tip: raise your org TPM tier at platform.openai.com/settings/organization/limits)",
+        );
+      }
+      throw new Error(`OpenAI error: ${errText.slice(0, 280)}`);
     }
 
     const payload = (await response.json()) as {
@@ -112,7 +133,7 @@ export async function runAssistantWithTools(
         messages.push({
           role: "tool",
           tool_call_id: call.id,
-          content: JSON.stringify(result),
+          content: trimToolResultForModel(call.function.name, result as Record<string, unknown>),
         });
       }
       continue;
@@ -133,3 +154,5 @@ export async function runAssistantWithTools(
     toolDetails,
   };
 }
+
+export { getAssistantModel };

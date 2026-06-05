@@ -1,5 +1,7 @@
 import type { VatCaseId } from "@/lib/vat/cases";
 import { classifyUnmatchedBankLine } from "@/lib/vat/classify-bank";
+import { searchFilingData } from "@/lib/vat/build-filing-context";
+import { getRecoveryOpportunities } from "@/lib/vat/bank-triage";
 import { buildElsterExport } from "@/lib/vat/export-elster";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 
@@ -210,6 +212,17 @@ export async function applySmartDefaults(filingPeriodId: string): Promise<ApplyR
   if (r2.affected) total += r2.affected;
   results.push(r2.message);
 
+  for (const pattern of ["cursor", "notion", "paddle", "snap inc"]) {
+    const rc = await confirmBankLinesMatching(
+      filingPeriodId,
+      pattern,
+      "non_eu_service_rc",
+      "Reverse charge from bank — smart default",
+    );
+    if (rc.affected) total += rc.affected;
+    results.push(rc.message);
+  }
+
   for (const pattern of ["safeway", "walgreens", "ben & jerry", "clipper", "transit fare"]) {
     const rd = await excludeDocumentsMatching(
       filingPeriodId,
@@ -316,10 +329,28 @@ export async function executeAssistantTool(
         String(args.pattern ?? ""),
         String(args.note ?? "Excluded in chat"),
       );
+    case "get_recovery_opportunities":
+      return (await getRecoveryOpportunities(filingPeriodId)) as ApplyResult & Record<string, unknown>;
+    case "search_filing_data":
+      return (await searchFilingData(
+        filingPeriodId,
+        String(args.pattern ?? ""),
+        (args.scope as "bank" | "documents" | "both") ?? "both",
+        args.limit != null ? Number(args.limit) : 25,
+      )) as ApplyResult & Record<string, unknown>;
     case "apply_smart_defaults":
       return applySmartDefaults(filingPeriodId);
-    case "refresh_elster_export":
-      return refreshElsterExport(filingPeriodId);
+    case "refresh_elster_export": {
+      const refreshed = await refreshElsterExport(filingPeriodId);
+      return {
+        ok: refreshed.ok,
+        message: refreshed.message,
+        vatPayable: refreshed.vatPayable,
+        includedDocuments: refreshed.includedDocuments,
+        excludedDocuments: refreshed.excludedDocuments,
+        warnings: refreshed.warnings?.slice(0, 8),
+      };
+    }
     default:
       return { ok: false, message: `Unknown tool: ${name}` };
   }

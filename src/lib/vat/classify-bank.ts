@@ -51,9 +51,9 @@ export function classifyUnmatchedBankLine(
     return {
       vatCase: "non_eu_service_rc",
       suggestion:
-        "US/international SaaS — usually reverse charge (§13b). Find vendor invoice PDF; if missing, request from vendor portal. Self-assess 19% if B2B service.",
-      action: "need_invoice",
-      priority: "high",
+        "US/international SaaS — reverse charge from bank amount after user confirms. Invoice PDF optional (vendor portal).",
+      action: "reverse_charge",
+      priority: "medium",
     };
   }
 
