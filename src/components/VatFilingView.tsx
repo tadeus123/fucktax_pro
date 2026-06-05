@@ -1,13 +1,22 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatDateRange, type VatFiling } from "@/lib/filings";
 import { uploadFilingFiles } from "@/lib/upload";
 import { UploadZone } from "./UploadZone";
 
 type Zone = "document" | "bank";
 
+type UploadStatusResponse = {
+  documents: number;
+  bank: number;
+  hasProcessed: boolean;
+  sessionStatus: string | null;
+};
+
 export function VatFilingView({ filing }: { filing: VatFiling }) {
+  const router = useRouter();
   const [documents, setDocuments] = useState<File[]>([]);
   const [bankFiles, setBankFiles] = useState<File[]>([]);
   const [documentsStored, setDocumentsStored] = useState(0);
@@ -18,14 +27,33 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
   const [bankProgress, setBankProgress] = useState(0);
   const [documentsError, setDocumentsError] = useState("");
   const [bankError, setBankError] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const [processError, setProcessError] = useState("");
+  const [alreadyProcessed, setAlreadyProcessed] = useState(false);
 
   const docQueueRef = useRef<File[]>([]);
   const bankQueueRef = useRef<File[]>([]);
   const docRunningRef = useRef(false);
   const bankRunningRef = useRef(false);
 
-  const ready = documentsStored > 0 && bankStored > 0;
+  const uploadsComplete = documentsStored > 0 && bankStored > 0;
   const periodRange = formatDateRange(filing.periodStart, filing.periodEnd);
+
+  useEffect(() => {
+    async function loadStatus() {
+      try {
+        const response = await fetch(`/api/upload/status?filingPeriodId=${filing.id}`);
+        if (!response.ok) return;
+        const status = (await response.json()) as UploadStatusResponse;
+        setDocumentsStored(status.documents);
+        setBankStored(status.bank);
+        setAlreadyProcessed(status.hasProcessed);
+      } catch {
+        // ignore — local upload counts still work
+      }
+    }
+    void loadStatus();
+  }, [filing.id]);
 
   const runQueue = useCallback(
     async (zone: Zone) => {
@@ -105,8 +133,36 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
     enqueueUpload("bank", toUpload);
   }
 
+  async function handleContinue() {
+    setProcessError("");
+
+    if (alreadyProcessed) {
+      router.push(`/vat/${filing.id}/review`);
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const response = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filingPeriodId: filing.id }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(body.error ?? "Processing failed");
+      }
+      router.push(`/vat/${filing.id}/review`);
+    } catch (err) {
+      setProcessError(err instanceof Error ? err.message : "Processing failed");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   const documentsStarted = documentsStored > 0 || documentsUploading;
-  const bankHighlighted = documentsStarted && bankStored === 0 && !bankUploading;
+  const bankHighlighted =
+    (documentsStarted || documentsUploading) && bankStored === 0 && !bankUploading;
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 py-10">
@@ -153,13 +209,20 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
       {bankError ? (
         <p className="mt-2 text-sm text-red-500">Bank: {bankError}</p>
       ) : null}
+      {processError ? <p className="mt-2 text-sm text-red-500">{processError}</p> : null}
 
-      {ready ? (
+      {uploadsComplete ? (
         <button
           type="button"
-          className="mt-12 rounded-full bg-white px-8 py-3 text-sm font-medium text-black transition hover:bg-zinc-200"
+          disabled={processing || documentsUploading || bankUploading}
+          onClick={handleContinue}
+          className="mt-12 rounded-full bg-white px-8 py-3 text-sm font-medium text-black transition hover:bg-zinc-200 disabled:opacity-40"
         >
-          Continue
+          {processing
+            ? "processing documents & bank…"
+            : alreadyProcessed
+              ? "View review"
+              : "Continue"}
         </button>
       ) : (
         <p className="mt-12 h-11 text-sm text-zinc-700">
