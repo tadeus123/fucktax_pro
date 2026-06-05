@@ -123,17 +123,73 @@ export const ASSISTANT_TOOLS = [
   {
     type: "function" as const,
     function: {
-      name: "search_filing_data",
+      name: "confirm_bank_lines_batch",
       description:
-        "Search unmatched bank lines and documents by substring (cursor, wallet, safeway). Call before exclude/confirm when you need counts or to verify a pattern.",
+        "Confirm multiple vendor patterns in ONE call (e.g. Snap + Notion + Cursor + Steam as reverse charge). Prefer this over multiple confirm_bank_lines_matching calls.",
       parameters: {
         type: "object",
         properties: {
-          pattern: { type: "string", description: "Case-insensitive substring" },
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                pattern: { type: "string", description: "Vendor substring, e.g. cursor" },
+                vat_case: {
+                  type: "string",
+                  enum: [
+                    "non_eu_service_rc",
+                    "eu_b2b_supplier_rc",
+                    "de_supplier_19",
+                    "private_mixed",
+                    "internal_transfer",
+                    "payment_without_invoice",
+                  ],
+                },
+                note: { type: "string" },
+              },
+              required: ["pattern", "vat_case"],
+            },
+          },
+        },
+        required: ["items"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_quarter_cashflow",
+      description:
+        "Quarter Einnahmen (income) and Ausgaben (expenses) from bank CSV, by bucket and top counterparties. Use when user asks about income/expenses/categories for the quarter — do NOT use search_filing_data with empty pattern for this.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_elster_export_status",
+      description:
+        "Check if ELSTER XML download is ready and list validation blockers. Call when user asks about ELSTER, XML, upload readiness, or export.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "search_filing_data",
+      description:
+        "Search unmatched bank lines and documents by substring (cursor, wallet, safeway). Omit pattern or use empty string for quarter summary buckets.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: "Case-insensitive substring; leave empty for summary only",
+          },
           scope: { type: "string", enum: ["bank", "documents", "both"], default: "both" },
           limit: { type: "number", description: "Max rows per scope, default 25" },
         },
-        required: ["pattern"],
       },
     },
   },

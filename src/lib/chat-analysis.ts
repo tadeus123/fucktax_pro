@@ -145,7 +145,7 @@ function buildRecommendations(
   const patternErrors = errors.find((e) => e.message === "Pattern required");
   if (patternErrors && patternErrors.count > 0) {
     recs.push(
-      `Add a quarter_summary tool (or allow empty pattern in search) — ${patternErrors.count} turn(s) failed with "Pattern required" when users asked for Einnahmen/Ausgaben or categories.`,
+      `Historical: ${patternErrors.count} turn(s) failed with "Pattern required" before get_quarter_cashflow / empty-pattern search_filing_data were added.`,
     );
   }
 
@@ -174,7 +174,7 @@ function buildRecommendations(
   const confirmTurns = turns.filter((t) => (t.tool_call_count ?? 0) >= 3).length;
   if (confirmTurns >= 2 && elsterTurns >= 2) {
     recs.push(
-      "Several turns used 3+ tool calls (confirm + refresh) — batch bank confirmations in one tool call where possible to cut latency.",
+      "Historical: multi-tool confirm rounds — confirm_bank_lines_batch is now available for Snap/Notion/Cursor/Steam in one call.",
     );
   }
 

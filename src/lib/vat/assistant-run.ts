@@ -51,6 +51,20 @@ function trimToolResultForModel(name: string, result: Record<string, unknown>): 
       unlinkedDocuments: result.unlinkedDocuments,
     });
   }
+  if (name === "get_quarter_cashflow") {
+    return JSON.stringify(result);
+  }
+  if (name === "get_elster_export_status") {
+    return JSON.stringify(result);
+  }
+  if (name === "confirm_bank_lines_batch") {
+    return JSON.stringify({
+      ok: result.ok,
+      message: result.message,
+      affected: result.affected,
+      details: result.details,
+    });
+  }
   return JSON.stringify({
     ok: result.ok,
     message: result.message,
@@ -150,6 +164,9 @@ export async function runAssistantWithTools(
 
         if (call.function.name === "refresh_elster_export" && ok) {
           elsterUpdated = true;
+          vatPayable = result.vatPayable as number | undefined;
+        }
+        if (call.function.name === "get_elster_export_status" && ok) {
           vatPayable = result.vatPayable as number | undefined;
         }
 

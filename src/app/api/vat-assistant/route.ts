@@ -4,6 +4,11 @@ import { VAT_ASSISTANT_SYSTEM_PROMPT } from "@/lib/vat/assistant-prompt";
 import { runAssistantWithTools, getAssistantModel } from "@/lib/vat/assistant-run";
 import { applySmartDefaults, refreshElsterExport } from "@/lib/vat/apply-actions";
 import { buildFilingContext } from "@/lib/vat/build-filing-context";
+import {
+  formatElsterBlockersForChat,
+  getElsterExportStatus,
+  mentionsElsterTopic,
+} from "@/lib/vat/elster-export-status";
 import { syncAutoTodosFromMessage } from "@/lib/supabase/filing-todos-queries";
 import {
   getReviewData,
@@ -205,10 +210,20 @@ export async function POST(request: NextRequest) {
       }
 
       emit?.({ type: "status", message: "Writing reply…" });
-      const messageId = await saveReviewMessage(filingPeriodId, "assistant", result.reply);
+
+      let reply = result.reply;
+      if (mentionsElsterTopic(message) || mentionsElsterTopic(reply)) {
+        const elsterStatus = await getElsterExportStatus(filingPeriodId);
+        const blockers = formatElsterBlockersForChat(elsterStatus);
+        if (blockers && !reply.includes("ELSTER XML")) {
+          reply += blockers;
+        }
+      }
+
+      const messageId = await saveReviewMessage(filingPeriodId, "assistant", reply);
       const todosSynced = await syncAutoTodosFromMessage(
         filingPeriodId,
-        result.reply,
+        reply,
         messageId ?? undefined,
       );
       await logChatEvent({
@@ -216,7 +231,7 @@ export async function POST(request: NextRequest) {
         turnId,
         eventType: "assistant_message",
         role: "assistant",
-        content: result.reply,
+        content: reply,
         durationMs: Date.now() - startedAt,
         metadata: {
           elster_updated: result.elsterUpdated,
@@ -226,7 +241,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      return { ...result, todosSynced };
+      return { ...result, reply, todosSynced };
     };
 
     if (useStream) {

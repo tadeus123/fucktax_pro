@@ -1,5 +1,9 @@
 import { classifyUnmatchedBankLine } from "@/lib/vat/classify-bank";
 import { formatTriageForPrompt } from "@/lib/vat/bank-triage";
+import {
+  formatCashflowForContext,
+  getQuarterCashflow,
+} from "@/lib/vat/quarter-cashflow";
 import type { ReviewData } from "@/lib/supabase/queries";
 import { getReviewData } from "@/lib/supabase/queries";
 
@@ -91,7 +95,7 @@ export function buildOpeningMessage(review: ReviewData | null): string {
   return `Ready for ${review.filingLabel}. Say what to fix in plain language — I'll update the numbers. When done, download ELSTER XML above.`;
 }
 
-/** Compact snapshot (~2–4k tokens). Use search_filing_data tool for line-level detail. */
+/** Compact snapshot (~2–4k tokens). Use search_filing_data / get_quarter_cashflow for detail. */
 export async function buildFilingContext(filingPeriodId: string): Promise<string | null> {
   const review = await getReviewData(filingPeriodId);
   if (!review) return null;
@@ -99,10 +103,12 @@ export async function buildFilingContext(filingPeriodId: string): Promise<string
   const withAmount = review.documents.filter((d) => d.grossAmount != null);
   const withoutAmount = review.documents.filter((d) => d.grossAmount == null);
   const buckets = groupUnmatchedBank(review);
+  const cashflow = await getQuarterCashflow(filingPeriodId);
 
   return [
     `FILING: ${review.filingLabel} (${review.periodRange})`,
     `STATS: docs=${review.stats.documents} (${withAmount.length} w/ amounts, ${withoutAmount.length} missing) | bank=${review.stats.bankLines} | matched=${review.stats.matched} | unmatched_bank=${review.unmatchedBank.length}`,
+    formatCashflowForContext(cashflow),
     formatTriageForPrompt(review),
     `UNMATCHED BANK BUCKETS: ${JSON.stringify(buckets)}`,
     `PRIORITY DOCS: ${JSON.stringify(priorityDocuments(review))}`,
@@ -121,7 +127,26 @@ export async function searchFilingData(
   if (!review) return { ok: false, message: "Filing not found" };
 
   const needle = pattern.trim().toLowerCase();
-  if (!needle) return { ok: false, message: "Pattern required" };
+  if (!needle) {
+    const buckets = groupUnmatchedBank(review);
+    const cashflow = await getQuarterCashflow(filingPeriodId);
+    return {
+      ok: true,
+      message: "Summary (no pattern filter). Use a vendor substring to drill down.",
+      pattern: "",
+      summary: true,
+      cashflow: {
+        einnahmenEur: cashflow.einnahmenEur,
+        ausgabenEur: cashflow.ausgabenEur,
+        netCashflowEur: cashflow.netCashflowEur,
+        topIncoming: cashflow.topIncoming.slice(0, 5),
+        topOutgoing: cashflow.topOutgoing.slice(0, 5),
+      },
+      unmatchedBuckets: buckets,
+      unmatchedBankCount: review.unmatchedBank.length,
+      documentCount: review.documents.length,
+    };
+  }
 
   const matchesPattern = (text: string) => text.toLowerCase().includes(needle);
 

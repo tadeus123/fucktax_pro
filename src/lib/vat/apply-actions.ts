@@ -4,6 +4,11 @@ import { searchWeb } from "@/lib/web-search";
 import { searchFilingData } from "@/lib/vat/build-filing-context";
 import { getRecoveryOpportunities } from "@/lib/vat/bank-triage";
 import { buildElsterExport } from "@/lib/vat/export-elster";
+import {
+  elsterStatusToToolResult,
+  getElsterExportStatus,
+} from "@/lib/vat/elster-export-status";
+import { cashflowToToolResult, getQuarterCashflow } from "@/lib/vat/quarter-cashflow";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 
 export type ApplyResult = {
@@ -180,8 +185,79 @@ export async function confirmBankLinesMatching(
 
   return {
     ok: true,
-    message: `Confirmed ${ids.length} bank line(s) as ${vatCase}.`,
+    message: `Confirmed ${ids.length} bank line(s) as ${vatCase} for "${pattern}".`,
     affected: ids.length,
+  };
+}
+
+export type BankConfirmBatchItem = {
+  pattern: string;
+  vat_case: string;
+  note: string;
+};
+
+/** Confirm multiple vendor patterns in one tool call (e.g. Snap + Notion + Cursor + Steam). */
+export async function confirmBankLinesBatch(
+  filingPeriodId: string,
+  items: BankConfirmBatchItem[],
+): Promise<ApplyResult & { details: string[] }> {
+  if (items.length === 0) {
+    return { ok: false, message: "No items in batch.", details: [] };
+  }
+
+  const sessionId = await getSessionId(filingPeriodId);
+  if (!sessionId) return { ok: false, message: "No upload session.", details: [] };
+
+  const supabase = createSupabaseAdmin();
+  const { data: lines } = await supabase
+    .from("bank_transactions")
+    .select("id, description, counterparty")
+    .eq("session_id", sessionId)
+    .eq("reconciliation_status", "unmatched");
+
+  const details: string[] = [];
+  let totalAffected = 0;
+  const updatedIds = new Set<string>();
+
+  for (const item of items) {
+    const ids = (lines ?? [])
+      .filter((line) => {
+        if (updatedIds.has(line.id)) return false;
+        const text = `${line.description ?? ""} ${line.counterparty ?? ""}`;
+        return matchesPattern(text, item.pattern);
+      })
+      .map((line) => line.id);
+
+    if (ids.length === 0) {
+      details.push(`"${item.pattern}": no unmatched lines`);
+      continue;
+    }
+
+    const { error } = await supabase
+      .from("bank_transactions")
+      .update({
+        treatment_case: item.vat_case,
+        treatment_note: item.note,
+        user_confirmed: true,
+        reconciliation_status: "resolved",
+      })
+      .in("id", ids);
+
+    if (error) {
+      details.push(`"${item.pattern}": ${error.message}`);
+      continue;
+    }
+
+    for (const id of ids) updatedIds.add(id);
+    totalAffected += ids.length;
+    details.push(`"${item.pattern}": ${ids.length} line(s) → ${item.vat_case}`);
+  }
+
+  return {
+    ok: true,
+    message: `Batch confirmed ${totalAffected} bank line(s) across ${items.length} pattern(s).`,
+    affected: totalAffected,
+    details,
   };
 }
 
@@ -213,16 +289,15 @@ export async function applySmartDefaults(filingPeriodId: string): Promise<ApplyR
   if (r2.affected) total += r2.affected;
   results.push(r2.message);
 
-  for (const pattern of ["cursor", "notion", "paddle", "snap inc"]) {
-    const rc = await confirmBankLinesMatching(
-      filingPeriodId,
-      pattern,
-      "non_eu_service_rc",
-      "Reverse charge from bank — smart default",
-    );
-    if (rc.affected) total += rc.affected;
-    results.push(rc.message);
-  }
+  const saasBatch = await confirmBankLinesBatch(filingPeriodId, [
+    { pattern: "cursor", vat_case: "non_eu_service_rc", note: "Reverse charge — smart default" },
+    { pattern: "notion", vat_case: "non_eu_service_rc", note: "Reverse charge — smart default" },
+    { pattern: "paddle", vat_case: "non_eu_service_rc", note: "Reverse charge — smart default" },
+    { pattern: "snap inc", vat_case: "non_eu_service_rc", note: "Reverse charge — smart default" },
+    { pattern: "steam", vat_case: "non_eu_service_rc", note: "Reverse charge — smart default" },
+  ]);
+  if (saasBatch.affected) total += saasBatch.affected ?? 0;
+  results.push(saasBatch.message);
 
   for (const pattern of ["safeway", "walgreens", "ben & jerry", "clipper", "transit fare"]) {
     const rd = await excludeDocumentsMatching(
@@ -324,6 +399,28 @@ export async function executeAssistantTool(
         String(args.vat_case ?? "non_eu_service_rc"),
         String(args.note ?? "Confirmed in chat"),
       );
+    case "confirm_bank_lines_batch": {
+      const rawItems = args.items;
+      const items: BankConfirmBatchItem[] = Array.isArray(rawItems)
+        ? rawItems.map((item) => {
+            const row = item as Record<string, unknown>;
+            return {
+              pattern: String(row.pattern ?? ""),
+              vat_case: String(row.vat_case ?? "non_eu_service_rc"),
+              note: String(row.note ?? "Confirmed in chat batch"),
+            };
+          })
+        : [];
+      return confirmBankLinesBatch(filingPeriodId, items.filter((i) => i.pattern));
+    }
+    case "get_quarter_cashflow": {
+      const cashflow = await getQuarterCashflow(filingPeriodId);
+      return cashflowToToolResult(cashflow) as ApplyResult & Record<string, unknown>;
+    }
+    case "get_elster_export_status": {
+      const status = await getElsterExportStatus(filingPeriodId);
+      return elsterStatusToToolResult(status) as ApplyResult & Record<string, unknown>;
+    }
     case "exclude_bank_lines_matching":
       return excludeBankLinesMatching(
         filingPeriodId,

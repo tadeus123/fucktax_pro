@@ -6,13 +6,19 @@ export function toolStatusLabel(name: string, args: Record<string, unknown>): st
     case "search_web":
       return query ? `Searching web for “${query}”…` : "Searching web…";
     case "search_filing_data":
-      return pattern ? `Searching bank for “${pattern}”…` : "Searching bank & documents…";
+      return pattern ? `Searching bank for “${pattern}”…` : "Summarizing quarter bank data…";
     case "get_recovery_opportunities":
       return "Scanning bank for recoverable VAT…";
     case "exclude_bank_lines_matching":
       return pattern ? `Excluding “${pattern}” bank lines…` : "Excluding bank lines…";
     case "confirm_bank_lines_matching":
       return pattern ? `Applying VAT treatment for “${pattern}”…` : "Confirming bank line treatment…";
+    case "confirm_bank_lines_batch":
+      return "Confirming bank lines (batch)…";
+    case "get_quarter_cashflow":
+      return "Calculating quarter Einnahmen & Ausgaben…";
+    case "get_elster_export_status":
+      return "Checking ELSTER XML export readiness…";
     case "exclude_documents_matching":
       return pattern ? `Excluding “${pattern}” documents…` : "Excluding documents…";
     case "set_document_filing":
