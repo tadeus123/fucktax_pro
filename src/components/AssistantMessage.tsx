@@ -1,27 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { renderMarkdownInline } from "@/lib/markdown-inline";
 import { parseActionableLines, todoItemKey, type FilingTodoItem } from "@/lib/filing-todos";
 
 function renderInline(part: string): ReactNode {
-  const segments = part.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return segments.map((seg, i) => {
-    if (seg.startsWith("**") && seg.endsWith("**")) {
-      return (
-        <strong key={i} className="font-medium text-zinc-100">
-          {seg.slice(2, -2)}
-        </strong>
-      );
-    }
-    if (seg.startsWith("`") && seg.endsWith("`")) {
-      return (
-        <code key={i} className="rounded bg-zinc-800 px-1 text-[12px]">
-          {seg.slice(1, -1)}
-        </code>
-      );
-    }
-    return seg;
-  });
+  return renderMarkdownInline(part);
 }
 
 export function AssistantMessage({

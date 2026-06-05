@@ -1,5 +1,6 @@
 "use client";
 
+import { renderMarkdownInline } from "@/lib/markdown-inline";
 import type { FilingTodoItem } from "@/lib/filing-todos";
 
 export function FilingTodoPanel({
@@ -21,7 +22,9 @@ export function FilingTodoPanel({
       <ul className="no-scrollbar flex-1 space-y-4 overflow-y-auto">
         {items.map((item) => (
           <li key={item.id} className="space-y-2">
-            <p className="text-[12px] leading-snug text-zinc-400">{item.text}</p>
+            <p className="text-[12px] leading-snug text-zinc-400">
+              {renderMarkdownInline(item.text, "font-medium text-zinc-300")}
+            </p>
             <div className="flex items-center gap-3">
               <button
                 type="button"
