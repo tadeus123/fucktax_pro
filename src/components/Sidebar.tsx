@@ -2,17 +2,43 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { JAHRESABSCHLUSS, STEUERERKLAERUNG, VAT_FILINGS } from "@/lib/filings";
+import {
+  formatShortDeadline,
+  isDeadlineUrgent,
+  JAHRESABSCHLUSS,
+  STEUERERKLAERUNG,
+  VAT_FILINGS,
+} from "@/lib/filings";
 
-function NavLink({ href, label, active }: { href: string; label: string; active: boolean }) {
+function NavLink({
+  href,
+  label,
+  deadline,
+  active,
+}: {
+  href: string;
+  label: string;
+  deadline: string;
+  active: boolean;
+}) {
+  const urgent = isDeadlineUrgent(deadline);
+  const due = formatShortDeadline(deadline);
+
   return (
     <Link
       href={href}
-      className={`block py-1.5 text-[13px] transition ${
+      className={`flex items-baseline justify-between gap-3 py-1.5 text-[13px] transition ${
         active ? "text-white" : "text-zinc-600 hover:text-zinc-400"
       }`}
     >
-      {label}
+      <span>{label}</span>
+      <span
+        className={`shrink-0 text-[10px] tabular-nums ${
+          urgent ? "text-red-500" : active ? "text-white/45" : "text-zinc-600"
+        }`}
+      >
+        {due}
+      </span>
     </Link>
   );
 }
@@ -28,7 +54,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-36 shrink-0 flex-col justify-between border-r border-zinc-900 px-5 py-8">
+    <aside className="flex w-40 shrink-0 flex-col justify-between border-r border-zinc-900 px-5 py-8">
       <nav className="space-y-4">
         <div className="space-y-1">
           {VAT_FILINGS.map((filing) => (
@@ -36,6 +62,7 @@ export function Sidebar() {
               key={filing.id}
               href={`/vat/${filing.id}`}
               label={filing.label}
+              deadline={filing.deadline}
               active={pathname === `/vat/${filing.id}`}
             />
           ))}
@@ -47,6 +74,7 @@ export function Sidebar() {
               key={filing.id}
               href={`/jahresabschluss/${filing.id}`}
               label="JA 2025"
+              deadline={filing.deadline}
               active={pathname === `/jahresabschluss/${filing.id}`}
             />
           ))}
@@ -55,6 +83,7 @@ export function Sidebar() {
               key={filing.id}
               href={`/steuer/${filing.id}`}
               label="Tax 2025"
+              deadline={filing.deadline}
               active={pathname === `/steuer/${filing.id}`}
             />
           ))}

@@ -87,6 +87,27 @@ export function getVatFiling(id: string): VatFiling | undefined {
   return VAT_FILINGS.find((f) => f.id === id);
 }
 
+const shortDeadlineFmt = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+});
+
+/** e.g. "10 Feb" */
+export function formatShortDeadline(deadline: string): string {
+  return shortDeadlineFmt.format(new Date(deadline));
+}
+
+/** Red when overdue or within 21 days. */
+export function isDeadlineUrgent(deadline: string, now = new Date()): boolean {
+  const due = new Date(deadline);
+  due.setHours(23, 59, 59, 999);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const msPerDay = 86400000;
+  const daysLeft = Math.ceil((due.getTime() - today.getTime()) / msPerDay);
+  return daysLeft <= 21;
+}
+
 export const DOCUMENT_UPLOAD_HINTS = [
   "Customer invoices",
   "Supplier invoices",
