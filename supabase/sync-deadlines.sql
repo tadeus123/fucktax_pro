@@ -33,7 +33,7 @@ update public.filing_periods set
 where id = 'q2-2026';
 
 update public.filing_periods set
-  label = 'Jahresabschluss 2025',
+  label = 'JA 2025',
   sidebar_label = 'JA 2025',
   deadline = '2026-06-30',
   deadline_label = 'Due 30 Jun 2026',
@@ -41,7 +41,7 @@ update public.filing_periods set
 where id = '2025-ja';
 
 update public.filing_periods set
-  label = 'Annual tax return 2025',
+  label = 'Tax 2025',
   sidebar_label = 'Tax 2025',
   deadline = '2026-07-31',
   deadline_label = 'Due 31 Jul 2026',

@@ -268,7 +268,7 @@ insert into public.filing_periods (
   (
     '2025-ja',
     'jahresabschluss',
-    'Jahresabschluss 2025',
+    'JA 2025',
     'JA 2025',
     '2025-01-01',
     '2025-12-31',
@@ -282,7 +282,7 @@ insert into public.filing_periods (
   (
     '2025-steuer',
     'steuer',
-    'Annual tax return 2025',
+    'Tax 2025',
     'Tax 2025',
     null,
     null,
