@@ -241,8 +241,8 @@ insert into public.filing_periods (
     '2026-01-01',
     '2026-03-31',
     null,
-    '2026-05-11',
-    'Due 11 May 2026',
+    '2026-04-10',
+    'Due 10 Apr 2026',
     'open',
     null,
     20
@@ -254,8 +254,8 @@ insert into public.filing_periods (
     '2026-04-01',
     '2026-06-30',
     null,
-    '2026-08-10',
-    'Due 10 Aug 2026',
+    '2026-07-10',
+    'Due 10 Jul 2026',
     'open',
     null,
     30

@@ -20,11 +20,6 @@ export type GenericFiling = {
   description: string;
 };
 
-/**
- * VAT deadlines: quarterly USt-VA with Dauerfristverlängerung (+1 month).
- * Standard (no extension): Q4 → 10 Jan, Q1 → 10 Apr, Q2 → 10 Jul.
- * Q1 2026 falls on Sunday 10 May → next business day 11 May.
- */
 export const VAT_FILINGS: VatFiling[] = [
   {
     id: "q4-2025",
@@ -40,8 +35,8 @@ export const VAT_FILINGS: VatFiling[] = [
     label: "Q1 2026",
     periodStart: "2026-01-01",
     periodEnd: "2026-03-31",
-    deadline: "2026-05-11",
-    deadlineLabel: "Due 11 May 2026",
+    deadline: "2026-04-10",
+    deadlineLabel: "Due 10 Apr 2026",
     status: "open",
   },
   {
@@ -49,8 +44,8 @@ export const VAT_FILINGS: VatFiling[] = [
     label: "Q2 2026",
     periodStart: "2026-04-01",
     periodEnd: "2026-06-30",
-    deadline: "2026-08-10",
-    deadlineLabel: "Due 10 Aug 2026",
+    deadline: "2026-07-10",
+    deadlineLabel: "Due 10 Jul 2026",
     status: "open",
   },
 ];
