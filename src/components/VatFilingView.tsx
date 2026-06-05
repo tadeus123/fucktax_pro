@@ -1,66 +1,112 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { formatDateRange, type VatFiling } from "@/lib/filings";
 import { uploadFilingFiles } from "@/lib/upload";
 import { UploadZone } from "./UploadZone";
+
+type Zone = "document" | "bank";
 
 export function VatFilingView({ filing }: { filing: VatFiling }) {
   const [documents, setDocuments] = useState<File[]>([]);
   const [bankFiles, setBankFiles] = useState<File[]>([]);
   const [documentsStored, setDocumentsStored] = useState(0);
   const [bankStored, setBankStored] = useState(0);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
+  const [documentsUploading, setDocumentsUploading] = useState(false);
+  const [bankUploading, setBankUploading] = useState(false);
+  const [documentsProgress, setDocumentsProgress] = useState(0);
+  const [bankProgress, setBankProgress] = useState(0);
+  const [documentsError, setDocumentsError] = useState("");
+  const [bankError, setBankError] = useState("");
 
-  const docsDone = documentsStored > 0;
-  const bankDone = bankStored > 0;
-  const ready = docsDone && bankDone;
+  const docQueueRef = useRef<File[]>([]);
+  const bankQueueRef = useRef<File[]>([]);
+  const docRunningRef = useRef(false);
+  const bankRunningRef = useRef(false);
+
+  const ready = documentsStored > 0 && bankStored > 0;
   const periodRange = formatDateRange(filing.periodStart, filing.periodEnd);
 
-  async function handleDocuments(incoming: File[]) {
-    setUploadError("");
+  const runQueue = useCallback(
+    async (zone: Zone) => {
+      const isDoc = zone === "document";
+      const queueRef = isDoc ? docQueueRef : bankQueueRef;
+      const runningRef = isDoc ? docRunningRef : bankRunningRef;
+      const setUploading = isDoc ? setDocumentsUploading : setBankUploading;
+      const setProgress = isDoc ? setDocumentsProgress : setBankProgress;
+      const setStored = isDoc ? setDocumentsStored : setBankStored;
+      const setError = isDoc ? setDocumentsError : setBankError;
+
+      if (runningRef.current) return;
+      runningRef.current = true;
+
+      while (queueRef.current.length > 0) {
+        const batch = queueRef.current.splice(0, queueRef.current.length);
+        setUploading(true);
+        setProgress(0);
+        setError("");
+
+        try {
+          const result = await uploadFilingFiles(filing.id, zone, batch, ({ completed, total }) => {
+            setProgress(total > 0 ? Math.round((completed / total) * 100) : 0);
+          });
+          setStored((count) => count + result.stored);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Upload failed");
+        } finally {
+          setUploading(false);
+          setProgress(0);
+        }
+      }
+
+      runningRef.current = false;
+    },
+    [filing.id],
+  );
+
+  function enqueueUpload(zone: Zone, files: File[]) {
+    if (files.length === 0) return;
+    if (zone === "document") {
+      docQueueRef.current.push(...files);
+      void runQueue("document");
+      return;
+    }
+    bankQueueRef.current.push(...files);
+    void runQueue("bank");
+  }
+
+  function handleDocuments(incoming: File[]) {
     const previousCount = documents.length;
     setDocuments(incoming);
 
-    const toUpload = incoming.slice(previousCount);
-    if (toUpload.length === 0) {
-      if (incoming.length === 0) setDocumentsStored(0);
+    if (incoming.length === 0) {
+      setDocumentsStored(0);
+      setDocumentsError("");
+      docQueueRef.current = [];
       return;
     }
 
-    setUploading(true);
-    try {
-      const result = await uploadFilingFiles(filing.id, "document", toUpload);
-      setDocumentsStored((count) => count + result.stored);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-    }
+    const toUpload = incoming.slice(previousCount);
+    enqueueUpload("document", toUpload);
   }
 
-  async function handleBank(incoming: File[]) {
-    setUploadError("");
+  function handleBank(incoming: File[]) {
     const previousCount = bankFiles.length;
     setBankFiles(incoming);
 
-    const toUpload = incoming.slice(previousCount);
-    if (toUpload.length === 0) {
-      if (incoming.length === 0) setBankStored(0);
+    if (incoming.length === 0) {
+      setBankStored(0);
+      setBankError("");
+      bankQueueRef.current = [];
       return;
     }
 
-    setUploading(true);
-    try {
-      const result = await uploadFilingFiles(filing.id, "bank", toUpload);
-      setBankStored((count) => count + result.stored);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-    }
+    const toUpload = incoming.slice(previousCount);
+    enqueueUpload("bank", toUpload);
   }
+
+  const documentsStarted = documentsStored > 0 || documentsUploading;
+  const bankHighlighted = documentsStarted && bankStored === 0 && !bankUploading;
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 py-10">
@@ -80,9 +126,11 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
           allowFolder
           files={documents}
           storedCount={documentsStored}
+          uploading={documentsUploading}
+          progress={documentsProgress}
+          highlighted={!documentsStarted}
           onFilesSelected={handleDocuments}
-          active={!docsDone && !uploading}
-          done={docsDone}
+          addMoreLabel="drop here to add more"
         />
         <UploadZone
           title="Bank"
@@ -91,15 +139,22 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
           uploadKind="bank"
           files={bankFiles}
           storedCount={bankStored}
+          uploading={bankUploading}
+          progress={bankProgress}
+          highlighted={bankHighlighted}
           onFilesSelected={handleBank}
-          active={docsDone && !bankDone && !uploading}
-          done={bankDone}
+          addMoreLabel="drop here to add more"
         />
       </div>
 
-      {uploadError ? (
-        <p className="mt-8 text-sm text-red-500">{uploadError}</p>
-      ) : ready ? (
+      {documentsError ? (
+        <p className="mt-6 text-sm text-red-500">Documents: {documentsError}</p>
+      ) : null}
+      {bankError ? (
+        <p className="mt-2 text-sm text-red-500">Bank: {bankError}</p>
+      ) : null}
+
+      {ready ? (
         <button
           type="button"
           className="mt-12 rounded-full bg-white px-8 py-3 text-sm font-medium text-black transition hover:bg-zinc-200"
@@ -108,11 +163,13 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
         </button>
       ) : (
         <p className="mt-12 h-11 text-sm text-zinc-700">
-          {uploading
-            ? "uploading & processing…"
-            : !docsDone
+          {documentsUploading || bankUploading
+            ? "uploads run in the background — you can fill both sides"
+            : documentsStored === 0
               ? "upload documents first"
-              : "then upload bank extract"}
+              : bankStored === 0
+                ? "then upload bank extract"
+                : null}
         </p>
       )}
     </div>
