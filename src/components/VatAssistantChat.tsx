@@ -6,9 +6,7 @@ import { ChatActivityIndicator } from "@/components/ChatActivityIndicator";
 import { FilingTodoPanel } from "@/components/FilingTodoPanel";
 import { logClientChatEvent } from "@/lib/chat-logger-client";
 import {
-  createTodoFromLine,
-  loadTodos,
-  saveTodos,
+  parsedLineToTodoInput,
   todoItemKey,
   type FilingTodoItem,
   type ParsedActionLine,
@@ -55,13 +53,21 @@ export function VatAssistantChat({
     activity ??
     (loading ? "Loading chat…" : uploading ? "Uploading files…" : sending ? "Sending…" : null);
 
-  useEffect(() => {
-    setTodos(loadTodos(filingPeriodId));
+  const refreshTodos = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `/api/filing-todos?filingPeriodId=${encodeURIComponent(filingPeriodId)}`,
+      );
+      const body = (await response.json()) as { todos?: FilingTodoItem[] };
+      if (response.ok) setTodos(body.todos ?? []);
+    } catch {
+      /* table may not exist yet */
+    }
   }, [filingPeriodId]);
 
   useEffect(() => {
-    saveTodos(filingPeriodId, todos);
-  }, [filingPeriodId, todos]);
+    void refreshTodos();
+  }, [refreshTodos]);
 
   useEffect(() => {
     async function load() {
@@ -92,19 +98,45 @@ export function VatAssistantChat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [displayMessages, showActivity, todos.length]);
 
-  const addTodo = useCallback((line: ParsedActionLine) => {
-    const item = createTodoFromLine(line);
-    setTodos((prev) => {
-      const key = todoItemKey(item);
-      if (prev.some((t) => todoItemKey(t) === key)) return prev;
-      return [...prev, item];
-    });
-  }, []);
+  const addTodo = useCallback(
+    async (line: ParsedActionLine) => {
+      try {
+        const response = await fetch("/api/filing-todos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsedLineToTodoInput(line, filingPeriodId)),
+        });
+        const body = (await response.json()) as { todo?: FilingTodoItem };
+        if (response.ok && body.todo) {
+          setTodos((prev) => {
+            const key = todoItemKey(body.todo!);
+            if (prev.some((t) => todoItemKey(t) === key)) return prev;
+            return [...prev, body.todo!];
+          });
+        }
+      } catch {
+        setError("Could not save todo — run supabase/filing-todos.sql");
+      }
+    },
+    [filingPeriodId],
+  );
 
-  const removeTodo = useCallback((id: string, status: "uploaded" | "not_found") => {
-    setTodos((prev) => prev.filter((t) => t.id !== id));
-    void logClientChatEvent(filingPeriodId, "client_quick_prompt", `todo_${status}`, { todoId: id });
-  }, [filingPeriodId]);
+  const removeTodo = useCallback(
+    async (id: string, status: "uploaded" | "not_found") => {
+      setTodos((prev) => prev.filter((t) => t.id !== id));
+      try {
+        await fetch(`/api/filing-todos/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+      } catch {
+        /* ignore */
+      }
+      void logClientChatEvent(filingPeriodId, "client_quick_prompt", `todo_${status}`, { todoId: id });
+    },
+    [filingPeriodId],
+  );
 
   async function readStreamedAssistantResponse(response: Response): Promise<{
     reply: string;
@@ -143,6 +175,7 @@ export function VatAssistantChat({
         } else if (event.type === "error") {
           throw new Error(event.error ?? "Send failed");
         } else if (event.type === "done") {
+          void refreshTodos();
           return {
             reply: event.reply ?? "",
             elsterUpdated: event.elsterUpdated,
@@ -286,7 +319,11 @@ export function VatAssistantChat({
                       </div>
                     ) : (
                       <div className="max-w-[92%] text-[14px] leading-relaxed text-zinc-300">
-                        <AssistantMessage content={msg.content} todos={todos} onAddTodo={addTodo} />
+                        <AssistantMessage
+                          content={msg.content}
+                          todos={todos}
+                          onAddTodo={(line) => void addTodo(line)}
+                        />
                       </div>
                     )}
                   </div>
@@ -356,7 +393,7 @@ export function VatAssistantChat({
         items={todos}
         uploadingId={todoUploadingId}
         onUpload={startTodoUpload}
-        onNotFound={(id) => removeTodo(id, "not_found")}
+        onNotFound={(id) => void removeTodo(id, "not_found")}
       />
     </div>
   );

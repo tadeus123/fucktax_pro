@@ -1,10 +1,16 @@
+export type FilingTodoKind = "invoice_recovery" | "action" | "upload" | "review";
+
+export type FilingTodoStatus = "open" | "uploaded" | "not_found" | "done";
+
 export type FilingTodoItem = {
   id: string;
   text: string;
   vendor: string;
   pattern: string;
-  status: "open" | "uploaded" | "not_found";
-  createdAt: number;
+  kind: FilingTodoKind;
+  status: FilingTodoStatus;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type ParsedActionLine = {
@@ -12,59 +18,90 @@ export type ParsedActionLine = {
   display: string;
   vendor: string;
   pattern: string;
+  kind: FilingTodoKind;
+  autoAdd: boolean;
+  metadata: Record<string, unknown>;
 };
 
-const STORAGE_PREFIX = "fucktax_todos_";
+const ACTION_VERBS =
+  /upload|confirm|review|exclude|check|invoice|receipt|beleg|provide|obtain|gather|download|sum up|calculate|verify|match|identify/i;
 
-export function todosStorageKey(filingPeriodId: string): string {
-  return `${STORAGE_PREFIX}${filingPeriodId}`;
+const RECOVERY_SIGNAL =
+  /estimated recovery|payments totaling|vorsteuer|missing invoice|upload the pdf|€|payment/i;
+
+function parseBulletBody(trimmed: string): { body: string; isBullet: boolean } {
+  const bullet = trimmed.match(/^(-|\d+\.)\s+([\s\S]+)$/);
+  if (!bullet) return { body: trimmed, isBullet: false };
+  return { body: bullet[2].trim(), isBullet: true };
 }
 
-export function loadTodos(filingPeriodId: string): FilingTodoItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(todosStorageKey(filingPeriodId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as FilingTodoItem[];
-    return parsed.filter((t) => t.status === "open");
-  } catch {
-    return [];
+function extractVendorAndDisplay(body: string): { vendor: string; display: string } {
+  const bold = body.match(/^\*\*([^*]+)\*\*:?\s*(.*)$/);
+  if (bold) {
+    const vendor = bold[1].trim();
+    const rest = bold[2]?.trim() ?? "";
+    const display = rest ? `**${vendor}:** ${rest}` : `**${vendor}:**`;
+    return { vendor, display };
   }
+  const colon = body.match(/^([^:]{3,60}):\s*(.+)$/);
+  if (colon) {
+    return { vendor: colon[1].trim(), display: body };
+  }
+  return { vendor: body.slice(0, 48).trim(), display: body };
 }
 
-export function saveTodos(filingPeriodId: string, items: FilingTodoItem[]): void {
-  if (typeof window === "undefined") return;
-  const open = items.filter((t) => t.status === "open");
-  if (open.length === 0) {
-    localStorage.removeItem(todosStorageKey(filingPeriodId));
-    return;
-  }
-  localStorage.setItem(todosStorageKey(filingPeriodId), JSON.stringify(open));
+function extractRecoveryMetadata(display: string): Record<string, unknown> {
+  const recovery = display.match(/estimated recovery:\s*€?([\d.,]+)/i);
+  const total = display.match(/totaling\s*€?([\d.,]+)/i);
+  const count = display.match(/(\d+)\s+payment/i);
+  return {
+    estimatedRecoveryEur: recovery?.[1] ?? null,
+    totalEur: total?.[1] ?? null,
+    paymentCount: count?.[1] ?? null,
+  };
 }
 
 export function parseActionableLines(content: string): ParsedActionLine[] {
   const results: ParsedActionLine[] = [];
+  const seen = new Set<string>();
 
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
-    if (!trimmed.startsWith("-")) continue;
+    if (!trimmed || trimmed.startsWith("#")) continue;
 
-    const vendorMatch = trimmed.match(/\*\*([^*]+)\*\*/);
-    if (!vendorMatch) continue;
+    const { body, isBullet } = parseBulletBody(trimmed);
+    if (!isBullet) continue;
 
-    const body = trimmed.slice(1).trim();
+    const { vendor, display } = extractVendorAndDisplay(body);
+    const isRecovery = RECOVERY_SIGNAL.test(display);
+    const hasBoldLabel = /^\*\*[^*]+\*\*/.test(body);
+    const isAction = ACTION_VERBS.test(display);
+
     const isActionable =
-      /estimated recovery|payments totaling|vorsteuer|missing invoice|upload the pdf|€/i.test(body) ||
-      /:\s*\d+\s+payment/i.test(body);
+      isRecovery || (hasBoldLabel && (isAction || display.includes(":"))) || isAction;
 
     if (!isActionable) continue;
 
-    const vendor = vendorMatch[1].trim();
+    const kind: FilingTodoKind = isRecovery
+      ? "invoice_recovery"
+      : /upload|invoice|receipt|beleg/i.test(display)
+        ? "upload"
+        : /review|check|verify|confirm/i.test(display)
+          ? "review"
+          : "action";
+
+    const key = `${kind}::${vendor.toLowerCase()}::${display.slice(0, 80)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
     results.push({
       raw: trimmed,
-      display: body,
+      display,
       vendor,
       pattern: vendor.toLowerCase().split(/[:(]/)[0]?.trim() || vendor.toLowerCase(),
+      kind,
+      autoAdd: kind === "invoice_recovery",
+      metadata: extractRecoveryMetadata(display),
     });
   }
 
@@ -72,16 +109,29 @@ export function parseActionableLines(content: string): ParsedActionLine[] {
 }
 
 export function todoItemKey(item: Pick<FilingTodoItem, "vendor" | "pattern" | "text">): string {
-  return `${item.pattern}::${item.vendor}`.toLowerCase();
+  return `${item.pattern}::${item.vendor}::${item.text.slice(0, 80)}`.toLowerCase();
 }
 
-export function createTodoFromLine(line: ParsedActionLine): FilingTodoItem {
+export function parsedLineToTodoInput(
+  line: ParsedActionLine,
+  filingPeriodId: string,
+  sourceMessageId?: string,
+): {
+  filingPeriodId: string;
+  text: string;
+  vendor: string;
+  pattern: string;
+  kind: FilingTodoKind;
+  metadata: Record<string, unknown>;
+  sourceMessageId?: string;
+} {
   return {
-    id: crypto.randomUUID(),
+    filingPeriodId,
     text: line.display,
     vendor: line.vendor,
     pattern: line.pattern,
-    status: "open",
-    createdAt: Date.now(),
+    kind: line.kind,
+    metadata: line.metadata,
+    sourceMessageId,
   };
 }

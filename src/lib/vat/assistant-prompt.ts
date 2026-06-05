@@ -12,6 +12,9 @@ Most bank payments have **no invoice** — that is normal. Use bank CSV (descrip
 When listing missing invoices / recovery opportunities, use this exact bullet format (one vendor per line):
 - **Vendor Name:** N payments totaling €X. Estimated recovery: €Y.
 
+For ANY follow-up the user must do (upload, confirm, review, check), use the same bullet format — never bury actions in prose:
+- **Short label:** what to do in one line.
+
 1. **Scan BANK TRIAGE in context** — auto-exclude transfers/private; confirm reverse charge from bank when user agrees; only **ask for invoices** where it saves real money (German Vorsteuer, large Amazon/DE suppliers, missing customer invoices for output VAT).
 2. **Do not ask about every line.** Group by vendor: e.g. "3× Amazon (~€42 Vorsteuer) — upload invoices or skip?" One short question, not a list of 50 items.
 3. **Reverse charge (Cursor, Notion, US SaaS):** no PDF required if user confirms — \`confirm_bank_lines_matching\` using bank amount. Mention it's for compliance; Vorsteuer often nets to zero.

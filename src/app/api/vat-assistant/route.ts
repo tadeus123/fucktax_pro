@@ -4,6 +4,7 @@ import { VAT_ASSISTANT_SYSTEM_PROMPT } from "@/lib/vat/assistant-prompt";
 import { runAssistantWithTools, getAssistantModel } from "@/lib/vat/assistant-run";
 import { applySmartDefaults, refreshElsterExport } from "@/lib/vat/apply-actions";
 import { buildFilingContext } from "@/lib/vat/build-filing-context";
+import { syncAutoTodosFromMessage } from "@/lib/supabase/filing-todos-queries";
 import {
   getReviewData,
   getReviewMessages,
@@ -15,7 +16,7 @@ export const runtime = "nodejs";
 
 type StreamEvent =
   | { type: "status"; message: string }
-  | { type: "done"; reply: string; elsterUpdated: boolean; vatPayable?: number }
+  | { type: "done"; reply: string; elsterUpdated: boolean; vatPayable?: number; todosSynced?: number }
   | { type: "error"; error: string };
 
 function getOpenAiKey(): string | undefined {
@@ -204,7 +205,12 @@ export async function POST(request: NextRequest) {
       }
 
       emit?.({ type: "status", message: "Writing reply…" });
-      await saveReviewMessage(filingPeriodId, "assistant", result.reply);
+      const messageId = await saveReviewMessage(filingPeriodId, "assistant", result.reply);
+      const todosSynced = await syncAutoTodosFromMessage(
+        filingPeriodId,
+        result.reply,
+        messageId ?? undefined,
+      );
       await logChatEvent({
         filingPeriodId,
         turnId,
@@ -220,7 +226,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      return result;
+      return { ...result, todosSynced };
     };
 
     if (useStream) {
@@ -232,6 +238,7 @@ export async function POST(request: NextRequest) {
             reply: result.reply,
             elsterUpdated: result.elsterUpdated,
             vatPayable: result.vatPayable,
+            todosSynced: result.todosSynced,
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Assistant failed";
