@@ -45,7 +45,7 @@ export const COMPANY_NOTES: CompanyNote[] = [
     ],
   },
   {
-    title: "Umsatzsteuer",
+    title: "Umsatzsteuer (VAT — Value Added Tax)",
     lines: [
       { kind: "text", value: "We file quarterly." },
       {
