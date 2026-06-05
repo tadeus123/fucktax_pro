@@ -1,18 +1,5 @@
-import {
-  COMPANY,
-  COMPANY_NOTES,
-  type CompanyLine,
-  type CompanyNote,
-} from "@/lib/company";
-import {
-  JAHRESABSCHLUSS,
-  STEUERERKLAERUNG,
-  VAT_FILINGS,
-  getFilingDeadlineById,
-  type FilingStatus,
-  type GenericFiling,
-  type VatFiling,
-} from "@/lib/filings";
+import type { CompanyLine, CompanyNote } from "@/lib/company";
+import type { FilingStatus, GenericFiling, VatFiling } from "@/lib/filings";
 import { createSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/server";
 
 type FilingPeriodRow = {
@@ -42,6 +29,15 @@ export type CompanyContent = {
   notes: CompanyNote[];
 };
 
+function supabaseRequired() {
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      "Supabase is required. Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY.",
+    );
+  }
+  return createSupabaseAdmin();
+}
+
 function filingHref(row: FilingPeriodRow): string {
   const base =
     row.filing_type === "vat"
@@ -52,122 +48,51 @@ function filingHref(row: FilingPeriodRow): string {
   return `/${base}/${row.route_segment}`;
 }
 
-function sidebarLabel(row: FilingPeriodRow): string {
-  if (row.filing_type === "jahresabschluss") return "JA 2025";
-  if (row.filing_type === "steuer") return "Tax 2025";
-  return row.label;
-}
-
-function withCanonicalDeadline(row: FilingPeriodRow): FilingPeriodRow {
-  const canonical = getFilingDeadlineById(row.id);
-  if (!canonical) return row;
-  return {
-    ...row,
-    deadline: canonical.deadline,
-    deadline_label: canonical.deadlineLabel,
-  };
-}
-
 function rowToVatFiling(row: FilingPeriodRow): VatFiling {
-  const resolved = withCanonicalDeadline(row);
   return {
-    id: resolved.id,
-    label: resolved.label,
-    periodStart: resolved.period_start ?? "",
-    periodEnd: resolved.period_end ?? "",
-    deadline: resolved.deadline,
-    deadlineLabel: resolved.deadline_label,
-    status: resolved.status,
+    id: row.id,
+    label: row.label,
+    periodStart: row.period_start ?? "",
+    periodEnd: row.period_end ?? "",
+    deadline: row.deadline,
+    deadlineLabel: row.deadline_label,
+    status: row.status,
   };
 }
 
 function rowToGenericFiling(row: FilingPeriodRow): GenericFiling {
-  const resolved = withCanonicalDeadline(row);
   return {
-    id: resolved.route_segment,
-    label: resolved.label,
-    periodLabel: resolved.period_label ?? "",
-    deadline: resolved.deadline,
-    deadlineLabel: resolved.deadline_label,
-    status: resolved.status,
-    description: resolved.description ?? "",
+    id: row.route_segment,
+    label: row.label,
+    periodLabel: row.period_label ?? "",
+    deadline: row.deadline,
+    deadlineLabel: row.deadline_label,
+    status: row.status,
+    description: row.description ?? "",
   };
 }
 
 export async function getSidebarFilings(): Promise<SidebarFiling[]> {
-  if (!isSupabaseConfigured()) {
-    return [
-      ...VAT_FILINGS.map((f) => ({
-        href: `/vat/${f.id}`,
-        label: f.label,
-        deadline: f.deadline,
-        filingType: "vat" as const,
-      })),
-      ...JAHRESABSCHLUSS.map((f) => ({
-        href: `/jahresabschluss/${f.id}`,
-        label: "JA 2025",
-        deadline: f.deadline,
-        filingType: "jahresabschluss" as const,
-      })),
-      ...STEUERERKLAERUNG.map((f) => ({
-        href: `/steuer/${f.id}`,
-        label: "Tax 2025",
-        deadline: f.deadline,
-        filingType: "steuer" as const,
-      })),
-    ];
-  }
-
-  const supabase = createSupabaseAdmin();
+  const supabase = supabaseRequired();
   const { data, error } = await supabase
     .from("filing_periods")
     .select("*")
     .order("sort_order", { ascending: true });
 
-  if (error || !data) {
-    return getSidebarFilingsFallback();
+  if (error) {
+    throw new Error(`Could not load filing periods: ${error.message}`);
   }
 
-  return (data as FilingPeriodRow[]).map((row) => {
-    const resolved = withCanonicalDeadline(row);
-    return {
-      href: filingHref(resolved),
-      label: sidebarLabel(resolved),
-      deadline: resolved.deadline,
-      filingType: resolved.filing_type,
-    };
-  });
-}
-
-function getSidebarFilingsFallback(): SidebarFiling[] {
-  return [
-    ...VAT_FILINGS.map((f) => ({
-      href: `/vat/${f.id}`,
-      label: f.label,
-      deadline: f.deadline,
-      filingType: "vat" as const,
-    })),
-    ...JAHRESABSCHLUSS.map((f) => ({
-      href: `/jahresabschluss/${f.id}`,
-      label: "JA 2025",
-      deadline: f.deadline,
-      filingType: "jahresabschluss" as const,
-    })),
-    ...STEUERERKLAERUNG.map((f) => ({
-      href: `/steuer/${f.id}`,
-      label: "Tax 2025",
-      deadline: f.deadline,
-      filingType: "steuer" as const,
-    })),
-  ];
+  return (data as FilingPeriodRow[]).map((row) => ({
+    href: filingHref(row),
+    label: row.label,
+    deadline: row.deadline,
+    filingType: row.filing_type,
+  }));
 }
 
 export async function getVatFilingByRoute(route: string): Promise<VatFiling | null> {
-  if (!isSupabaseConfigured()) {
-    return VAT_FILINGS.find((f) => f.id === route) ?? null;
-  }
-
-  const supabase = createSupabaseAdmin();
+  const supabase = supabaseRequired();
   const { data, error } = await supabase
     .from("filing_periods")
     .select("*")
@@ -175,27 +100,18 @@ export async function getVatFilingByRoute(route: string): Promise<VatFiling | nu
     .or(`id.eq.${route},route_segment.eq.${route}`)
     .maybeSingle();
 
-  if (error || !data) {
-    return VAT_FILINGS.find((f) => f.id === route) ?? null;
+  if (error) {
+    throw new Error(`Could not load VAT filing: ${error.message}`);
   }
 
-  return rowToVatFiling(data as FilingPeriodRow);
+  return data ? rowToVatFiling(data as FilingPeriodRow) : null;
 }
 
 export async function getGenericFilingByRoute(
   type: "jahresabschluss" | "steuer",
   route: string,
 ): Promise<GenericFiling | null> {
-  const fallback =
-    type === "jahresabschluss"
-      ? JAHRESABSCHLUSS.find((f) => f.id === route)
-      : STEUERERKLAERUNG.find((f) => f.id === route);
-
-  if (!isSupabaseConfigured()) {
-    return fallback ?? null;
-  }
-
-  const supabase = createSupabaseAdmin();
+  const supabase = supabaseRequired();
   const { data, error } = await supabase
     .from("filing_periods")
     .select("*")
@@ -203,28 +119,30 @@ export async function getGenericFilingByRoute(
     .or(`id.eq.${route},route_segment.eq.${route}`)
     .maybeSingle();
 
-  if (error || !data) {
-    return fallback ?? null;
+  if (error) {
+    throw new Error(`Could not load filing: ${error.message}`);
   }
 
-  return rowToGenericFiling(data as FilingPeriodRow);
+  return data ? rowToGenericFiling(data as FilingPeriodRow) : null;
 }
 
 export async function getCompanyContent(): Promise<CompanyContent> {
-  if (!isSupabaseConfigured()) {
-    return { name: COMPANY.name, tagline: COMPANY.tagline, notes: COMPANY_NOTES };
+  const supabase = supabaseRequired();
+
+  const [{ data: profile, error: profileError }, { data: sections, error: sectionsError }, { data: lines, error: linesError }] =
+    await Promise.all([
+      supabase.from("company_profile").select("name, tagline").eq("id", 1).maybeSingle(),
+      supabase.from("company_sections").select("id, title, sort_order").order("sort_order"),
+      supabase.from("company_lines").select("section_id, kind, value, sort_order").order("sort_order"),
+    ]);
+
+  const error = profileError ?? sectionsError ?? linesError;
+  if (error) {
+    throw new Error(`Could not load company content: ${error.message}`);
   }
 
-  const supabase = createSupabaseAdmin();
-
-  const [{ data: profile }, { data: sections }, { data: lines }] = await Promise.all([
-    supabase.from("company_profile").select("name, tagline").eq("id", 1).maybeSingle(),
-    supabase.from("company_sections").select("id, title, sort_order").order("sort_order"),
-    supabase.from("company_lines").select("section_id, kind, value, sort_order").order("sort_order"),
-  ]);
-
-  if (!profile || !sections || !lines) {
-    return { name: COMPANY.name, tagline: COMPANY.tagline, notes: COMPANY_NOTES };
+  if (!profile || !sections?.length || !lines?.length) {
+    throw new Error("Company content is missing in Supabase. Run supabase/addon.sql.");
   }
 
   const notes: CompanyNote[] = sections.map((section) => ({
@@ -248,7 +166,7 @@ export async function getCompanyContent(): Promise<CompanyContent> {
 }
 
 export async function getOrCreateUploadSession(filingPeriodId: string): Promise<string> {
-  const supabase = createSupabaseAdmin();
+  const supabase = supabaseRequired();
 
   const { data: existing } = await supabase
     .from("upload_sessions")

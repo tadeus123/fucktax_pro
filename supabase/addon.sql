@@ -2,8 +2,8 @@
 -- Supabase Dashboard → SQL Editor → paste ALL of this file → Run
 --
 -- Adds: company profile/content tables, route_segment for filings, seed data.
--- IMPORTANT: Run from line 1 — deadline updates at the top are not optional.
--- Or run supabase/sync-deadlines.sql alone to fix sidebar dates only.
+-- IMPORTANT: Run from line 1 — filing_period sync at the top is not optional.
+-- Or run supabase/sync-deadlines.sql alone to refresh filing_periods rows.
 
 -- ---------------------------------------------------------------------------
 -- Filing periods: URL segment (e.g. /jahresabschluss/2025)
@@ -23,32 +23,37 @@ where id in ('2025-ja', '2025-steuer');
 alter table public.filing_periods
   alter column route_segment set not null;
 
--- Sync deadlines with app (safe to re-run)
+-- Sync deadlines + sidebar labels (safe to re-run)
 update public.filing_periods set
+  label = 'Q4 2025',
   deadline = '2026-01-12',
   deadline_label = 'Due 12 Jan 2026',
   updated_at = now()
 where id = 'q4-2025';
 
 update public.filing_periods set
+  label = 'Q1 2026',
   deadline = '2026-04-10',
   deadline_label = 'Due 10 Apr 2026',
   updated_at = now()
 where id = 'q1-2026';
 
 update public.filing_periods set
+  label = 'Q2 2026',
   deadline = '2026-07-10',
   deadline_label = 'Due 10 Jul 2026',
   updated_at = now()
 where id = 'q2-2026';
 
 update public.filing_periods set
+  label = 'JA 2025',
   deadline = '2026-06-30',
   deadline_label = 'Due 30 Jun 2026',
   updated_at = now()
 where id = '2025-ja';
 
 update public.filing_periods set
+  label = 'Tax 2025',
   deadline = '2026-07-31',
   deadline_label = 'Due 31 Jul 2026',
   updated_at = now()

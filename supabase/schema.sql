@@ -205,7 +205,7 @@ create trigger vat_summaries_set_updated_at
   for each row execute function public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
--- Seed filing periods (matches src/lib/filings.ts)
+-- Seed filing periods (Supabase is the app source of truth)
 -- ---------------------------------------------------------------------------
 
 insert into public.filing_periods (
@@ -263,7 +263,7 @@ insert into public.filing_periods (
   (
     '2025-ja',
     'jahresabschluss',
-    'Jahresabschluss 2025',
+    'JA 2025',
     '2025-01-01',
     '2025-12-31',
     'Geschäftsjahr 2025 (1 Jan – 31 Dec)',
@@ -276,7 +276,7 @@ insert into public.filing_periods (
   (
     '2025-steuer',
     'steuer',
-    'Annual tax return 2025',
+    'Tax 2025',
     null,
     null,
     'Veranlagung 2025',
