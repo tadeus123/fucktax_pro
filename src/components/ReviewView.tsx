@@ -46,7 +46,7 @@ export function ReviewView({
   }
 
   return (
-    <div className="flex h-screen flex-col bg-black">
+    <div className="flex h-screen flex-col overflow-hidden bg-black">
       <header className="flex shrink-0 items-center justify-between px-6 py-4">
         <h1 className="text-[13px] text-zinc-500">{data.filingLabel}</h1>
         <button

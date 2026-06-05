@@ -233,7 +233,7 @@ export function VatAssistantChat({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto">
+      <div className="no-scrollbar flex-1 overflow-y-auto">
         {!loading ? (
           <div className="mx-auto max-w-2xl space-y-4 px-6 py-6">
             {displayMessages.map((msg, index) => (

@@ -9,7 +9,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex h-screen overflow-hidden bg-black">
       <Sidebar filings={filings} />
-      <main className="min-w-0 flex-1 overflow-auto">{children}</main>
+      <main className="no-scrollbar min-w-0 flex-1 overflow-auto">{children}</main>
     </div>
   );
 }
