@@ -16,11 +16,17 @@ export function CompanyView() {
                 {note.title}
               </h2>
               <div className="space-y-2">
-                {note.lines.map((line) => (
-                  <p key={line} className="text-sm leading-relaxed text-zinc-400">
-                    {line}
-                  </p>
-                ))}
+                {note.lines.map((line, i) =>
+                  line.kind === "text" ? (
+                    <p key={i} className="text-sm leading-relaxed text-zinc-400">
+                      {line.value}
+                    </p>
+                  ) : (
+                    <p key={i} className="text-[13px] text-zinc-600">
+                      {line.value}
+                    </p>
+                  ),
+                )}
               </div>
             </section>
           ))}
