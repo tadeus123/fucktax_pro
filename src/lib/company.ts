@@ -9,12 +9,6 @@ export type CompanySection = {
   rows: CompanyRow[];
 };
 
-export type CompanyDeadline = {
-  label: string;
-  date: string;
-  alt?: string;
-};
-
 export const COMPANY = {
   name: "HUGE Production GmbH",
   tagline: "GmbH · Dresden · HRB 46720",
@@ -50,11 +44,7 @@ export const COMPANY_SECTIONS: CompanySection[] = [
     rows: [
       { label: "KSt + Soli", value: "15.825%" },
       { label: "GewSt Dresden", value: "15.75%" },
-      {
-        label: "Total profit tax",
-        value: "31.575%",
-        note: "Before dividend tax",
-      },
+      { label: "Total profit tax", value: "31.575%" },
     ],
   },
   {
@@ -62,14 +52,6 @@ export const COMPANY_SECTIONS: CompanySection[] = [
     rows: [
       { label: "Geschäftsführer", value: "Tadeus Mehl\nKonstantin Saifoulline" },
       { label: "Representation", value: "Einzelvertretung" },
-    ],
-  },
-  {
-    title: "payroll",
-    rows: [
-      { label: "Tadeus", value: "237 EUR gross + 263 EUR PKV" },
-      { label: "Konstantin", value: "500 EUR gross" },
-      { label: "Since", value: "01.07.2025" },
     ],
   },
   {
@@ -86,23 +68,4 @@ export const COMPANY_SECTIONS: CompanySection[] = [
       { label: "JA", value: "Bilanz · GuV · Anhang · Offenlegung" },
     ],
   },
-];
-
-export const COMPANY_DEADLINES: CompanyDeadline[] = [
-  { label: "Q4 2025 VAT", date: "2026-01-12", alt: "10 Feb with extension" },
-  { label: "Q1 2026 VAT", date: "2026-04-10", alt: "11 May with extension" },
-  { label: "Q2 2026 VAT", date: "2026-07-10", alt: "10 Aug with extension" },
-  { label: "JA 2025", date: "2026-06-30" },
-  { label: "Tax 2025", date: "2026-07-31" },
-  { label: "Publish 2025", date: "2026-12-31" },
-];
-
-export const COMPANY_MISSING = [
-  "ELSTER access",
-  "Dauerfristverlängerung",
-  "Soll vs Ist-Versteuerung",
-  "Last submitted VAT filing",
-  "EORI number",
-  "Accounting software",
-  "PKV tax treatment (Tadeus)",
 ];
