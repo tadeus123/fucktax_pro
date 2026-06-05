@@ -189,7 +189,7 @@ function buildRecommendations(
   const elsterQuestions = intents.find((i) => i.intent === "ELSTER / XML export");
   if ((elsterQuestions?.count ?? 0) > downloads) {
     recs.push(
-      "Users asked about XML readiness more often than they downloaded — surface export blockers inline in chat when ELSTER is mentioned.",
+      "Users asked about XML readiness more than they downloaded — ELSTER blockers are now appended inline when ELSTER/XML is mentioned.",
     );
   }
 
