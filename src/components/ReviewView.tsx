@@ -55,19 +55,14 @@ export function ReviewView({
     <div className="flex h-screen flex-col overflow-hidden bg-black">
       <header className="flex shrink-0 items-center justify-between px-6 py-4">
         <h1 className="text-[13px] text-zinc-500">{data.filingLabel}</h1>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            type="button"
-            disabled={exporting}
-            onClick={() => void downloadElster()}
-            className="text-[13px] text-zinc-400 transition hover:text-white disabled:opacity-40"
-          >
-            {exporting ? "…" : "ELSTER XML"}
-          </button>
-          <p className="max-w-xs text-right text-[11px] text-zinc-600">
-            Mein ELSTER import only — upload XML, check fields, do not submit until reviewed.
-          </p>
-        </div>
+        <button
+          type="button"
+          disabled={exporting}
+          onClick={() => void downloadElster()}
+          className="text-[13px] text-zinc-400 transition hover:text-white disabled:opacity-40"
+        >
+          {exporting ? "…" : "ELSTER XML"}
+        </button>
       </header>
 
       {exportError ? (
