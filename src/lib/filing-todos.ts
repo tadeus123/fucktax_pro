@@ -31,7 +31,7 @@ const RECOVERY_SIGNAL =
 
 /** Status / metrics lines — never offer + todo on these. */
 const NON_TODO_LINE =
-  /vat payable|included documents|excluded documents|included in elster|excluded from rollup|elster xml|current status|auto bank matches|still need review|bank transaction|output vat check|not ready|if you have any further|download elster|kz\d+/i;
+  /vat payable|included documents|excluded documents|included in elster|excluded from rollup|elster rebuilt|elster xml|current status|auto bank matches|bank matches this run|still need review|bank transaction|output vat check|not ready|if you have any further|download elster|kz\d+|no ai guesswork/i;
 
 function extractVendorAndDisplay(body: string): { vendor: string; display: string } {
   const bold = body.match(/^\*\*([^*]+)\*\*:?\s*(.*)$/);

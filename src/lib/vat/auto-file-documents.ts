@@ -69,6 +69,12 @@ function fillAmounts(
   return { gross, net: 0, vat: 0, rate: r };
 }
 
+function numFromUnknown(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(String(value).replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
 /** After chat upload: mark extracted supplier invoices for ELSTER rollup with amounts. */
 export async function autoApplyUploadedDocumentsToElster(
   filingPeriodId: string,
@@ -81,7 +87,7 @@ export async function autoApplyUploadedDocumentsToElster(
   const { data: records } = await supabase
     .from("document_records")
     .select(
-      "id, file_id, counterparty_name, document_type, risk_status, confidence, gross_amount, net_amount, vat_amount, vat_rate",
+      "id, file_id, counterparty_name, document_type, risk_status, confidence, gross_amount, net_amount, vat_amount, vat_rate, raw_extraction",
     )
     .eq("filing_period_id", filingPeriodId)
     .in("file_id", fileIds);
@@ -110,10 +116,22 @@ export async function autoApplyUploadedDocumentsToElster(
     );
     if (!vatCase) continue;
 
-    const gross = row.gross_amount != null ? Number(row.gross_amount) : null;
-    const net = row.net_amount != null ? Number(row.net_amount) : null;
-    const vat = row.vat_amount != null ? Number(row.vat_amount) : null;
-    const rate = row.vat_rate != null ? Number(row.vat_rate) : null;
+    const gross =
+      row.gross_amount != null
+        ? Number(row.gross_amount)
+        : numFromUnknown((row.raw_extraction as Record<string, unknown> | null)?.gross_amount);
+    const net =
+      row.net_amount != null
+        ? Number(row.net_amount)
+        : numFromUnknown((row.raw_extraction as Record<string, unknown> | null)?.net_amount);
+    const vat =
+      row.vat_amount != null
+        ? Number(row.vat_amount)
+        : numFromUnknown((row.raw_extraction as Record<string, unknown> | null)?.vat_amount);
+    const rate =
+      row.vat_rate != null
+        ? Number(row.vat_rate)
+        : numFromUnknown((row.raw_extraction as Record<string, unknown> | null)?.vat_rate);
 
     const filled = fillAmounts(gross, net, vat, rate, vatCase);
     if (filled.vat <= 0 && filled.net <= 0) continue;
@@ -121,6 +139,10 @@ export async function autoApplyUploadedDocumentsToElster(
     const { error } = await supabase
       .from("document_records")
       .update({
+        counterparty_name:
+          row.counterparty_name && !/^\d{1,2}[./]\d{1,2}[./]\d{2,4}$/.test(row.counterparty_name.trim())
+            ? row.counterparty_name
+            : inferSupplierFromFilename(filename) ?? row.counterparty_name,
         risk_status: vatCase,
         confidence: "likely",
         gross_amount: filled.gross,

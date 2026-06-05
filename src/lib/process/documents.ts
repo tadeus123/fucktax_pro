@@ -59,6 +59,104 @@ async function extractPdfPageImages(buffer: Buffer, maxPages = 2): Promise<strin
   return result.pages.map((page) => page.dataUrl);
 }
 
+function parseEuroAmount(raw: string): number | null {
+  const cleaned = raw.trim().replace(/\s/g, "");
+  if (!cleaned) return null;
+  const normalized =
+    cleaned.includes(",") && cleaned.includes(".")
+      ? cleaned.replace(/\./g, "").replace(",", ".")
+      : cleaned.replace(",", ".");
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Regex fallback when AI misses amounts on German invoices. */
+function parseAmountsFromGermanInvoiceText(text: string): {
+  gross_amount: number | null;
+  net_amount: number | null;
+  vat_amount: number | null;
+  vat_rate: number | null;
+} {
+  const grossPatterns = [
+    /(?:Gesamtbetrag|Rechnungsbetrag|Summe|Brutto|Total(?:betrag)?|Endbetrag)[^\d€]{0,20}€?\s*([\d.\s]+,\d{2}|\d+\.\d{2})/i,
+    /€\s*([\d.\s]+,\d{2}|\d+\.\d{2})\s*(?:\(|[^\n]{0,12}(?:brutto|gesamt|total))/i,
+  ];
+  const netPatterns = [
+    /(?:Nettobetrag|Netto|Zwischensumme)[^\d€]{0,20}€?\s*([\d.\s]+,\d{2}|\d+\.\d{2})/i,
+  ];
+  const vatPatterns = [
+    /(?:MwSt|USt|Mehrwertsteuer|VAT)[^\d€]{0,24}€?\s*([\d.\s]+,\d{2}|\d+\.\d{2})/i,
+    /(?:MwSt|USt|VAT)[^\d]{0,8}(\d{1,2})\s*%\s*[^\d€]{0,12}€?\s*([\d.\s]+,\d{2}|\d+\.\d{2})/i,
+  ];
+
+  let gross_amount: number | null = null;
+  for (const pattern of grossPatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      gross_amount = parseEuroAmount(match[1]);
+      if (gross_amount != null) break;
+    }
+  }
+
+  let net_amount: number | null = null;
+  for (const pattern of netPatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      net_amount = parseEuroAmount(match[1]);
+      if (net_amount != null) break;
+    }
+  }
+
+  let vat_amount: number | null = null;
+  let vat_rate: number | null = null;
+  for (const pattern of vatPatterns) {
+    const match = text.match(pattern);
+    if (match?.[2]) {
+      vat_rate = Number(match[1]);
+      vat_amount = parseEuroAmount(match[2]);
+      break;
+    }
+    if (match?.[1]) {
+      vat_amount = parseEuroAmount(match[1]);
+      if (vat_amount != null) break;
+    }
+  }
+
+  const rateMatch = text.match(/(\d{1,2})\s*%\s*(?:MwSt|USt|Mehrwertsteuer|VAT)/i);
+  if (rateMatch && vat_rate == null) {
+    vat_rate = Number(rateMatch[1]);
+  }
+
+  if (gross_amount == null && net_amount != null && vat_amount != null) {
+    gross_amount = net_amount + vat_amount;
+  }
+
+  return { gross_amount, net_amount, vat_amount, vat_rate };
+}
+
+function mergeParsedAmounts(
+  extraction: DocumentExtraction,
+  parsed: ReturnType<typeof parseAmountsFromGermanInvoiceText>,
+): DocumentExtraction {
+  if (extraction.gross_amount != null || extraction.net_amount != null) return extraction;
+
+  const hasParsed =
+    parsed.gross_amount != null || parsed.net_amount != null || parsed.vat_amount != null;
+  if (!hasParsed) return extraction;
+
+  return {
+    ...extraction,
+    gross_amount: parsed.gross_amount ?? extraction.gross_amount,
+    net_amount: parsed.net_amount ?? extraction.net_amount,
+    vat_amount: parsed.vat_amount ?? extraction.vat_amount,
+    vat_rate: parsed.vat_rate ?? extraction.vat_rate ?? 19,
+    confidence: extraction.confidence === "do_not_deduct" ? "likely" : extraction.confidence,
+    warning: extraction.warning?.includes("Could not read")
+      ? null
+      : extraction.warning,
+  };
+}
+
 function guessFromFilename(filename: string): DocumentExtraction {
   const lower = filename.toLowerCase();
   let document_type = "other";
@@ -230,6 +328,15 @@ async function extractWithOpenAi(
       if (textResult?.gross_amount != null || textResult?.net_amount != null) {
         return textResult;
       }
+      if (textResult) {
+        const merged = mergeParsedAmounts(textResult, parseAmountsFromGermanInvoiceText(text));
+        if (merged.gross_amount != null || merged.net_amount != null) return merged;
+      } else {
+        const parsedOnly = parseAmountsFromGermanInvoiceText(text);
+        if (parsedOnly.gross_amount != null || parsedOnly.net_amount != null) {
+          return mergeParsedAmounts(guessFromFilename(filename), parsedOnly);
+        }
+      }
     }
 
     try {
@@ -251,7 +358,15 @@ async function extractWithOpenAi(
           ],
           "gpt-4o",
         );
-        if (visionResult) return visionResult;
+        if (visionResult) {
+          if (visionResult.gross_amount != null || visionResult.net_amount != null) {
+            return visionResult;
+          }
+          if (text.trim().length >= 200) {
+            return mergeParsedAmounts(visionResult, parseAmountsFromGermanInvoiceText(text));
+          }
+          return visionResult;
+        }
       }
     } catch {
       // fall through

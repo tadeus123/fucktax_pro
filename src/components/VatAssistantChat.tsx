@@ -258,6 +258,11 @@ export function VatAssistantChat({
       matched?: number;
       documentsProcessed?: number;
       failures?: string[];
+      vatPayable?: number;
+      inputVatDeductible?: number;
+      elsterApplied?: number;
+      includedDocuments?: number;
+      excludedDocuments?: number;
     };
     if (!response.ok) {
       throw new Error(data.error ?? "Processing failed");
@@ -294,25 +299,6 @@ export function VatAssistantChat({
       return `Uploaded ${stored} file(s) but extraction failed: ${failHint}`;
     }
 
-    if (userText.trim()) {
-      if (extracted.length === 0) return userText.trim();
-      const summary = extracted
-        .map((d) => {
-          const parts = [
-            d.counterparty ?? "unknown",
-            d.grossAmount != null ? `gross €${d.grossAmount.toFixed(2)}` : null,
-            d.matchedBank ? "bank matched" : "not bank-matched",
-          ].filter(Boolean);
-          return `${d.filename}: ${parts.join(", ")}`;
-        })
-        .join("; ");
-      return `${userText.trim()}\n\n[Uploaded: ${summary}]`;
-    }
-
-    if (extracted.length === 0) {
-      return `Uploaded ${stored} file(s). Process and update ELSTER.`;
-    }
-
     const lines = extracted.map((d) => {
       const amounts = [
         d.grossAmount != null ? `gross €${d.grossAmount.toFixed(2)}` : null,
@@ -342,6 +328,7 @@ export function VatAssistantChat({
     if (excluded != null) stats.push(`Excluded from rollup: ${excluded}.`);
 
     return [
+      userText.trim() ? `${userText.trim()}\n` : "",
       `Uploaded and extracted ${extracted.length} document(s):`,
       ...lines,
       "",

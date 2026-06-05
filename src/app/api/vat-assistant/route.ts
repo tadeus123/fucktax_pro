@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { reconcileSession } from "@/lib/process/run";
 import { logChatEvent, newChatTurnId } from "@/lib/chat-logger";
 import { VAT_ASSISTANT_SYSTEM_PROMPT } from "@/lib/vat/assistant-prompt";
 import { runAssistantWithTools, getAssistantModel } from "@/lib/vat/assistant-run";
@@ -9,6 +10,11 @@ import {
   getElsterExportStatus,
   mentionsElsterTopic,
 } from "@/lib/vat/elster-export-status";
+import {
+  formatElsterReprocessReply,
+  reprocessFilingElster,
+  shouldRunBackendElsterRefresh,
+} from "@/lib/vat/reprocess-elster";
 import {
   getReviewData,
   getReviewMessages,
@@ -179,6 +185,66 @@ export async function POST(request: NextRequest) {
 
     if (!message) {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
+    }
+
+    if (shouldRunBackendElsterRefresh(message)) {
+      const runBackendRefresh = async (emit?: (event: StreamEvent) => void) => {
+        emit?.({ type: "status", message: "Filing invoices & rebuilding ELSTER…" });
+        await saveReviewMessage(filingPeriodId, "user", message);
+        await logChatEvent({
+          filingPeriodId,
+          turnId,
+          eventType: "user_message",
+          role: "user",
+          content: message,
+        });
+
+        const result = await reprocessFilingElster(filingPeriodId, reconcileSession);
+        const reply = formatElsterReprocessReply(result);
+
+        await saveReviewMessage(filingPeriodId, "assistant", reply);
+        await logChatEvent({
+          filingPeriodId,
+          turnId,
+          eventType: "assistant_message",
+          role: "assistant",
+          content: reply,
+          durationMs: Date.now() - startedAt,
+          metadata: {
+            elster_updated: true,
+            vat_payable: result.vatPayable,
+            source: "backend_elster_refresh",
+            elster_applied: result.elsterApplied,
+            bank_matched: result.matched,
+          },
+        });
+
+        return {
+          reply,
+          elsterUpdated: true,
+          vatPayable: result.vatPayable ?? undefined,
+        };
+      };
+
+      if (useStream) {
+        return ndjsonStream(async (emit) => {
+          try {
+            const result = await runBackendRefresh(emit);
+            emit({
+              type: "done",
+              reply: result.reply,
+              elsterUpdated: result.elsterUpdated,
+              vatPayable: result.vatPayable,
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "ELSTER refresh failed";
+            emit({ type: "error", error: msg });
+          }
+        });
+      }
+
+      const result = await runBackendRefresh();
+      return NextResponse.json(result);
     }
 
     const apiKey = getOpenAiKey();

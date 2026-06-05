@@ -111,35 +111,70 @@ function dedupeFilesByName(files: UploadedFileRow[]): UploadedFileRow[] {
   return unique;
 }
 
+function looksLikeDateOnly(text: string): boolean {
+  return /^\d{1,2}[./]\d{1,2}[./]\d{2,4}$/.test(text.trim());
+}
+
+function parseInvoiceDateFromFilename(filename: string): string | null {
+  const match = filename.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (!match) return null;
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function parseInvoiceNumberFromFilename(filename: string): string | null {
+  const match = filename.match(/\b(to\d{6,})\b/i);
+  return match?.[1] ?? null;
+}
+
 function enrichExtractionFromFilename(
   filename: string,
   extraction: DocumentExtraction,
 ): DocumentExtraction {
   const supplier = inferSupplierFromFilename(filename);
-  if (!supplier) return extraction;
+  const invoiceDateFromFile = parseInvoiceDateFromFilename(filename);
+  const invoiceNumberFromFile = parseInvoiceNumberFromFilename(filename);
 
-  const cp = extraction.counterparty_name ?? "";
+  let next: DocumentExtraction = { ...extraction };
+
+  if (invoiceDateFromFile && !next.invoice_date) {
+    next.invoice_date = invoiceDateFromFile;
+  }
+  if (invoiceNumberFromFile && !next.invoice_number) {
+    next.invoice_number = invoiceNumberFromFile;
+  }
+
+  if (!supplier) return next;
+
+  const cp = next.counterparty_name ?? "";
   const cpIsCustomer = /huge production/i.test(cp);
   const cpIsSupplier =
     matchesVendorPattern(cp, supplier) || matchesVendorPattern(cp, "tokenize");
+  const cpIsBad =
+    cpIsCustomer ||
+    !cp.trim() ||
+    looksLikeDateOnly(cp) ||
+    (next.invoice_date != null && cp.trim() === next.invoice_date.trim());
 
-  if (cpIsSupplier) return extraction;
+  if (cpIsSupplier && !cpIsBad) return next;
 
-  if (cpIsCustomer || !cp.trim()) {
-    return {
-      ...extraction,
+  if (cpIsBad) {
+    next = {
+      ...next,
       counterparty_name: supplier,
       document_type:
-        extraction.document_type === "other" ? "supplier_invoice" : extraction.document_type,
-      vat_case: extraction.vat_case ?? "de_supplier_19",
+        next.document_type === "other" ? "supplier_invoice" : next.document_type,
+      vat_case: next.vat_case ?? "de_supplier_19",
       confidence:
-        extraction.confidence === "do_not_deduct" && extraction.gross_amount != null
+        next.confidence === "do_not_deduct" &&
+        (next.gross_amount != null || next.net_amount != null || next.vat_amount != null)
           ? "likely"
-          : extraction.confidence,
+          : next.confidence === "review" && (next.gross_amount != null || next.net_amount != null)
+            ? "likely"
+            : next.confidence,
     };
   }
 
-  return extraction;
+  return next;
 }
 
 function bankAmountMatchesDocument(
@@ -426,7 +461,7 @@ async function processDocumentFiles(
   return { processed, needsReview, skipped, outcomes, failures };
 }
 
-async function reconcileSession(
+export async function reconcileSession(
   supabase: ReturnType<typeof createSupabaseAdmin>,
   sessionId: string,
   filingPeriodId: string,
@@ -603,6 +638,57 @@ function applyBankMatchFlags(
   }));
 }
 
+async function refreshOutcomesFromRecords(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  filingPeriodId: string,
+  fileIds: string[],
+  outcomes: ProcessedDocumentSummary[],
+  matchFlags: Map<string, boolean>,
+): Promise<ProcessedDocumentSummary[]> {
+  if (fileIds.length === 0) return outcomes;
+
+  const { data: records } = await supabase
+    .from("document_records")
+    .select(
+      "file_id, counterparty_name, gross_amount, vat_amount, invoice_number, confidence, warning",
+    )
+    .eq("filing_period_id", filingPeriodId)
+    .in("file_id", fileIds);
+
+  const { data: files } = await supabase
+    .from("uploaded_files")
+    .select("id, original_filename")
+    .in("id", fileIds);
+
+  const recordByFileId = new Map((records ?? []).map((row) => [row.file_id, row] as const));
+  const fileIdByName = new Map(
+    (files ?? []).map((f) => [f.original_filename.toLowerCase(), f.id] as const),
+  );
+
+  return outcomes.map((outcome) => {
+    const fileId = fileIdByName.get(outcome.filename.toLowerCase());
+    const row = fileId ? recordByFileId.get(fileId) : undefined;
+    if (!row) {
+      return {
+        ...outcome,
+        matchedBank: matchFlags.get(outcome.filename.toLowerCase()) ?? outcome.matchedBank,
+      };
+    }
+
+    return {
+      filename: outcome.filename,
+      counterparty: row.counterparty_name,
+      grossAmount: row.gross_amount != null ? Number(row.gross_amount) : null,
+      vatAmount: row.vat_amount != null ? Number(row.vat_amount) : null,
+      invoiceNumber: row.invoice_number,
+      matchedBank: matchFlags.get(outcome.filename.toLowerCase()) ?? false,
+      confidence: row.confidence ?? outcome.confidence,
+      status: outcome.status,
+      error: row.warning ?? outcome.error,
+    };
+  });
+}
+
 async function bankMatchFlagsForFiles(
   supabase: ReturnType<typeof createSupabaseAdmin>,
   sessionId: string,
@@ -705,17 +791,24 @@ export async function runIncrementalDocumentProcess(
     filing.period_end,
   );
 
-  const matched = await reconcileSession(supabase, session.id, filingPeriodId);
   const { applied: elsterApplied } = await autoApplyUploadedDocumentsToElster(
     filingPeriodId,
     filesToProcess.map((f) => f.id),
   );
+  const matched = await reconcileSession(supabase, session.id, filingPeriodId);
   const matchFlags = await bankMatchFlagsForFiles(
     supabase,
     session.id,
     filesToProcess.map((f) => f.id),
   );
-  const recentDocuments = applyBankMatchFlags(outcomes, matchFlags);
+  let recentDocuments = applyBankMatchFlags(outcomes, matchFlags);
+  recentDocuments = await refreshOutcomesFromRecords(
+    supabase,
+    filingPeriodId,
+    filesToProcess.map((f) => f.id),
+    recentDocuments,
+    matchFlags,
+  );
 
   if (documentsProcessed === 0 && failures.length === 0 && skipped === filesToProcess.length) {
     failures.push("All uploaded files were skipped — check file types (PDF/images only).");
