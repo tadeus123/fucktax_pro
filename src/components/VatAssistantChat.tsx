@@ -277,6 +277,8 @@ export function VatAssistantChat({
       vatPayable?: number;
       inputVatDeductible?: number;
       elsterApplied?: number;
+      includedDocuments?: number;
+      excludedDocuments?: number;
     },
   ): string {
     const docs = processResult.recentDocuments ?? [];
@@ -320,26 +322,78 @@ export function VatAssistantChat({
         .join(", ");
       const bank = d.matchedBank ? "bank matched" : "no bank match yet";
       const warn = d.error ? ` — ${d.error}` : "";
-      return `- ${d.filename}: ${d.counterparty ?? "unknown supplier"}${amounts ? ` (${amounts})` : ""} — ${bank}${warn}`;
+      return `${d.filename}: ${d.counterparty ?? "unknown supplier"}${amounts ? ` (${amounts})` : ""} — ${bank}${warn}`;
     });
 
-    const payableLine =
-      processResult.vatPayable != null
-        ? `ELSTER updated — VAT payable **€${processResult.vatPayable.toFixed(2)}** (input Vorsteuer €${(processResult.inputVatDeductible ?? 0).toFixed(2)}).`
-        : "";
+    const inputVat = processResult.inputVatDeductible ?? 0;
+    const payable = processResult.vatPayable ?? 0;
+    const included = processResult.includedDocuments;
+    const excluded = processResult.excludedDocuments;
+
+    const stats: string[] = [];
+    if (processResult.vatPayable != null) {
+      stats.push(
+        payable <= 0 && inputVat > 0
+          ? `VAT payable €${payable.toFixed(2)} (Vorsteuer €${inputVat.toFixed(2)} deducted — refund or zero due).`
+          : `VAT payable €${payable.toFixed(2)} (input Vorsteuer €${inputVat.toFixed(2)}).`,
+      );
+    }
+    if (included != null) stats.push(`Included in ELSTER rollup: ${included}.`);
+    if (excluded != null) stats.push(`Excluded from rollup: ${excluded}.`);
 
     return [
       `Uploaded and extracted ${extracted.length} document(s):`,
       ...lines,
       "",
-      payableLine,
+      ...stats,
       processResult.elsterApplied
-        ? `${processResult.elsterApplied} invoice(s) filed as de_supplier_19 in ELSTER rollup.`
+        ? `${processResult.elsterApplied} invoice(s) filed as de_supplier_19.`
         : "",
       `Auto bank matches: ${processResult.matched ?? 0}. Download ELSTER XML to verify Kz66/Kz98.`,
     ]
       .filter(Boolean)
       .join("\n");
+  }
+
+  async function saveUploadSummary(
+    userMessage: string,
+    assistantReply: string,
+    vatPayable?: number,
+  ) {
+    await waitForAssistantIdle();
+    assistantBusyRef.current = true;
+    setSending(true);
+    setActivity("Saving…");
+    setError("");
+
+    try {
+      const response = await fetch("/api/vat-assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filingPeriodId,
+          action: "upload_summary",
+          userMessage,
+          message: assistantReply,
+          vatPayable,
+          elsterUpdated: true,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Failed to save upload summary");
+
+      setMessages((prev) => [...prev, { role: "assistant", content: assistantReply }]);
+      if (typeof data.vatPayable === "number") {
+        onElsterUpdated?.({ vatPayable: data.vatPayable });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save upload summary");
+    } finally {
+      assistantBusyRef.current = false;
+      setSending(false);
+      setActivity(null);
+      inputRef.current?.focus();
+    }
   }
 
   async function postUserMessage(
@@ -411,7 +465,7 @@ export function VatAssistantChat({
       result.stored,
       result.processResult,
     );
-    await postUserMessage(assistantMsg, { clearInput: false, skipUserBubble: true });
+    await saveUploadSummary(userBubble, assistantMsg, result.processResult.vatPayable);
     if (result.processResult.vatPayable != null) {
       onElsterUpdated?.({ vatPayable: result.processResult.vatPayable });
     }
@@ -427,6 +481,8 @@ export function VatAssistantChat({
       vatPayable?: number;
       inputVatDeductible?: number;
       elsterApplied?: number;
+      includedDocuments?: number;
+      excludedDocuments?: number;
     };
   } | null> {
     if (uploadingRef.current) {

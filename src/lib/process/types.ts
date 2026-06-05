@@ -23,4 +23,6 @@ export type ProcessResult = {
   vatPayable?: number;
   inputVatDeductible?: number;
   elsterApplied?: number;
+  includedDocuments?: number;
+  excludedDocuments?: number;
 };

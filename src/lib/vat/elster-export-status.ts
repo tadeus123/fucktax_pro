@@ -44,7 +44,7 @@ export function formatElsterBlockersForChat(status: ElsterExportStatus): string 
     return `\n\n**ELSTER XML:** Ready for Mein ELSTER import. VAT payable **€${status.vatPayable?.toFixed(2) ?? "?"}**. Use **ELSTER XML** above to download — import only, do not submit until reviewed.`;
   }
   if (status.validationErrors.length === 0) return "";
-  return `\n\n**ELSTER XML — not ready:**\n${status.validationErrors.map((e) => `- ${e}`).join("\n")}`;
+  return `\n\n**ELSTER XML — not ready:**\n${status.validationErrors.join("\n")}`;
 }
 
 export function mentionsElsterTopic(text: string): boolean {

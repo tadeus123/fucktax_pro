@@ -77,8 +77,11 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       filingPeriodId?: string;
       message?: string;
-      action?: "smart_defaults";
+      userMessage?: string;
+      action?: "smart_defaults" | "upload_summary";
       stream?: boolean;
+      vatPayable?: number;
+      elsterUpdated?: boolean;
     };
     const filingPeriodId = body.filingPeriodId?.trim();
     const message = body.message?.trim();
@@ -87,14 +90,6 @@ export async function POST(request: NextRequest) {
 
     if (!filingPeriodId) {
       return NextResponse.json({ error: "Missing filingPeriodId" }, { status: 400 });
-    }
-
-    const apiKey = getOpenAiKey();
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "OPENAI_API_KEY not configured — add it to enable the assistant." },
-        { status: 503 },
-      );
     }
 
     if (body.action === "smart_defaults") {
@@ -142,8 +137,56 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (body.action === "upload_summary") {
+      const reply = message;
+      const userMessage = body.userMessage?.trim();
+      if (!reply) {
+        return NextResponse.json({ error: "Missing upload summary message" }, { status: 400 });
+      }
+
+      if (userMessage) {
+        await saveReviewMessage(filingPeriodId, "user", userMessage);
+        await logChatEvent({
+          filingPeriodId,
+          turnId,
+          eventType: "user_message",
+          role: "user",
+          content: userMessage,
+        });
+      }
+
+      await saveReviewMessage(filingPeriodId, "assistant", reply);
+      await logChatEvent({
+        filingPeriodId,
+        turnId,
+        eventType: "assistant_message",
+        role: "assistant",
+        content: reply,
+        durationMs: Date.now() - startedAt,
+        metadata: {
+          elster_updated: body.elsterUpdated ?? true,
+          vat_payable: body.vatPayable,
+          source: "upload_summary",
+        },
+      });
+
+      return NextResponse.json({
+        reply,
+        elsterUpdated: body.elsterUpdated ?? true,
+        vatPayable: body.vatPayable,
+      });
+    }
+
     if (!message) {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
+    }
+
+    const apiKey = getOpenAiKey();
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "OPENAI_API_KEY not configured — add it to enable the assistant." },
+        { status: 503 },
+      );
     }
 
     const runTurn = async (emit?: (event: StreamEvent) => void) => {

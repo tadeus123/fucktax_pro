@@ -27,25 +27,25 @@ const ACTION_VERBS =
   /upload|confirm|review|exclude|check|invoice|receipt|beleg|provide|obtain|gather|download|sum up|calculate|verify|match|identify/i;
 
 const RECOVERY_SIGNAL =
-  /estimated recovery|payments totaling|vorsteuer|missing invoice|upload the pdf|€|payment/i;
+  /estimated recovery|payments totaling|vorsteuer|missing invoice|upload the pdf/i;
 
-function parseBulletBody(trimmed: string): { body: string; isBullet: boolean } {
-  const bullet = trimmed.match(/^(-|\d+\.)\s+([\s\S]+)$/);
-  if (!bullet) return { body: trimmed, isBullet: false };
-  return { body: bullet[2].trim(), isBullet: true };
-}
+/** Status / metrics lines — never offer + todo on these. */
+const NON_TODO_LINE =
+  /vat payable|included documents|excluded documents|included in elster|excluded from rollup|elster xml|current status|auto bank matches|still need review|bank transaction|output vat check|not ready|if you have any further|download elster|kz\d+/i;
 
 function extractVendorAndDisplay(body: string): { vendor: string; display: string } {
   const bold = body.match(/^\*\*([^*]+)\*\*:?\s*(.*)$/);
   if (bold) {
-    const vendor = bold[1].trim();
+    const vendor = bold[1].trim().replace(/:+$/, "");
     const rest = bold[2]?.trim() ?? "";
     const display = rest ? `**${vendor}:** ${rest}` : `**${vendor}:**`;
     return { vendor, display };
   }
   const colon = body.match(/^([^:]{3,60}):\s*(.+)$/);
   if (colon) {
-    return { vendor: colon[1].trim(), display: body };
+    const vendor = colon[1].trim().replace(/:+$/, "");
+    const rest = colon[2].trim();
+    return { vendor, display: `${vendor}: ${rest}` };
   }
   return { vendor: body.slice(0, 48).trim(), display: body };
 }
@@ -61,6 +61,12 @@ function extractRecoveryMetadata(display: string): Record<string, unknown> {
   };
 }
 
+function parseBulletBody(trimmed: string): { body: string; isBullet: boolean } {
+  const bullet = trimmed.match(/^(-|\d+\.)\s+([\s\S]+)$/);
+  if (!bullet) return { body: trimmed, isBullet: false };
+  return { body: bullet[2].trim(), isBullet: true };
+}
+
 export function parseActionableLines(content: string): ParsedActionLine[] {
   const results: ParsedActionLine[] = [];
   const seen = new Set<string>();
@@ -73,12 +79,15 @@ export function parseActionableLines(content: string): ParsedActionLine[] {
     if (!isBullet) continue;
 
     const { vendor, display } = extractVendorAndDisplay(body);
+    if (NON_TODO_LINE.test(vendor) || NON_TODO_LINE.test(display)) continue;
+
     const isRecovery = RECOVERY_SIGNAL.test(display);
     const hasBoldLabel = /^\*\*[^*]+\*\*/.test(body);
     const isAction = ACTION_VERBS.test(display);
 
     const isActionable =
-      isRecovery || (hasBoldLabel && (isAction || display.includes(":"))) || isAction;
+      (hasBoldLabel && isRecovery) ||
+      (hasBoldLabel && isAction && /upload|invoice|receipt|beleg|confirm|exclude|review|check/i.test(display));
 
     if (!isActionable) continue;
 

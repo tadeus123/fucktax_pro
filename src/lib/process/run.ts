@@ -727,6 +727,8 @@ export async function runIncrementalDocumentProcess(
 
   let vatPayable: number | undefined;
   let inputVatDeductible: number | undefined;
+  let includedDocuments: number | undefined;
+  let excludedDocuments: number | undefined;
 
   try {
     const { buildElsterExport } = await import("@/lib/vat/export-elster");
@@ -734,6 +736,8 @@ export async function runIncrementalDocumentProcess(
     if (pkg) {
       vatPayable = pkg.rollup.vatPayable;
       inputVatDeductible = pkg.rollup.inputVatDeductible;
+      includedDocuments = pkg.rollup.includedDocuments;
+      excludedDocuments = pkg.rollup.excludedDocuments;
     }
   } catch {
     // optional
@@ -763,6 +767,8 @@ export async function runIncrementalDocumentProcess(
     vatPayable,
     inputVatDeductible,
     elsterApplied,
+    includedDocuments,
+    excludedDocuments,
   };
 }
 
