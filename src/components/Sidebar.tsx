@@ -96,13 +96,25 @@ export function Sidebar() {
         </div>
       </nav>
 
-      <button
-        type="button"
-        onClick={handleLogout}
-        className="text-left text-[11px] text-zinc-700 hover:text-zinc-500"
-      >
-        out
-      </button>
+      <div className="space-y-1">
+        <Link
+          href="/company"
+          className={`block py-1.5 text-[11px] transition ${
+            pathname === "/company"
+              ? "text-zinc-400"
+              : "text-zinc-700 hover:text-zinc-500"
+          }`}
+        >
+          company
+        </Link>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="block py-1.5 text-left text-[11px] text-zinc-700 hover:text-zinc-500"
+        >
+          out
+        </button>
+      </div>
     </aside>
   );
 }
