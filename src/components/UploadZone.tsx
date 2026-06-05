@@ -66,13 +66,7 @@ export function UploadZone({
 
   const emphasis = active || dragOver;
   const busy = scanning;
-  const dropLabel = allowFolder
-    ? busy
-      ? "reading folder…"
-      : "drop folder, zip, or files"
-    : busy
-      ? "reading…"
-      : "drop here";
+  const dropLabel = busy ? "adding files…" : "drop here";
 
   return (
     <div className="flex flex-1 flex-col">

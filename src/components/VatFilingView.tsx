@@ -75,7 +75,7 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
       <div className="flex w-full max-w-2xl flex-col gap-4 sm:flex-row sm:gap-6">
         <UploadZone
           title="Documents"
-          hint="any invoices, receipts, scans — folder or .zip"
+          hint="invoices · receipts · customs · anything relevant"
           uploadKind="document"
           allowFolder
           files={documents}
@@ -86,7 +86,7 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
         />
         <UploadZone
           title="Bank"
-          hint="CSV, PDF, or .zip with export"
+          hint="bank export · all transactions in the period"
           accept=".csv,.pdf,.xlsx,.xls,.txt,.ofx,.qif,.xml,.zip"
           uploadKind="bank"
           files={bankFiles}
