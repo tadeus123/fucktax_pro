@@ -4,28 +4,20 @@ import { useCallback, useRef, useState } from "react";
 
 type UploadZoneProps = {
   title: string;
-  subtitle: string;
-  periodLabel: string;
-  hints: string[];
   accept: string;
   onFilesSelected: (files: File[]) => void;
   files: File[];
+  active: boolean;
+  done: boolean;
 };
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export function UploadZone({
   title,
-  subtitle,
-  periodLabel,
-  hints,
   accept,
   onFilesSelected,
   files,
+  active,
+  done,
 }: UploadZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -45,40 +37,35 @@ export function UploadZone({
     addFiles(e.dataTransfer.files);
   }
 
-  return (
-    <div className="flex h-full flex-col rounded-2xl border border-zinc-800 bg-zinc-900/50">
-      <div className="border-b border-zinc-800 px-5 py-4">
-        <p className="text-xs font-semibold uppercase tracking-wider text-emerald-500">
-          {periodLabel}
-        </p>
-        <h2 className="mt-1 text-lg font-semibold text-white">{title}</h2>
-        <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>
-      </div>
+  const emphasis = active || dragOver;
 
-      <div
-        role="button"
-        tabIndex={0}
+  return (
+    <div className="flex flex-1 flex-col">
+      <button
+        type="button"
         onClick={() => inputRef.current?.click()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
-        }}
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
-        className={`mx-4 mt-4 flex flex-1 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition ${
-          dragOver
-            ? "border-emerald-400 bg-emerald-500/10"
-            : "border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800/40"
-        }`}
+        className={`flex flex-1 flex-col items-center justify-center rounded-2xl border px-8 py-16 text-center transition-all duration-300 ${
+          emphasis
+            ? "border-white bg-white/[0.03] shadow-[0_0_0_1px_rgba(255,255,255,0.06)]"
+            : done
+              ? "border-zinc-800 bg-transparent opacity-50"
+              : "border-zinc-800/80 bg-transparent opacity-30"
+        } ${dragOver ? "scale-[1.01]" : ""}`}
       >
-        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-800 text-xl">
-          ↑
-        </div>
-        <p className="text-sm font-medium text-zinc-200">Drop files here or click to browse</p>
-        <p className="mt-1 text-xs text-zinc-500">PDF, images, CSV, Excel — multiple files OK</p>
+        <p className={`text-xl tracking-tight ${emphasis ? "text-white" : "text-zinc-500"}`}>
+          {title}
+        </p>
+        {done ? (
+          <p className="mt-3 text-sm text-zinc-500">{files.length} files</p>
+        ) : active ? (
+          <p className="mt-3 text-sm text-zinc-400">drop here</p>
+        ) : null}
         <input
           ref={inputRef}
           type="file"
@@ -90,49 +77,19 @@ export function UploadZone({
             e.target.value = "";
           }}
         />
-      </div>
+      </button>
 
-      <div className="px-5 py-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-          Include
-        </p>
-        <ul className="space-y-1">
-          {hints.map((hint) => (
-            <li key={hint} className="flex gap-2 text-xs text-zinc-400">
-              <span className="text-emerald-600">•</span>
-              <span>{hint}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {files.length > 0 ? (
-        <div className="border-t border-zinc-800 px-5 py-4">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              Selected ({files.length})
-            </p>
-            <button
-              type="button"
-              onClick={() => onFilesSelected([])}
-              className="text-xs text-zinc-500 hover:text-zinc-300"
-            >
-              Clear all
-            </button>
-          </div>
-          <ul className="max-h-36 space-y-1 overflow-y-auto">
-            {files.map((file, i) => (
-              <li
-                key={`${file.name}-${i}`}
-                className="flex items-center justify-between gap-2 rounded-lg bg-zinc-800/60 px-2 py-1.5 text-xs"
-              >
-                <span className="truncate text-zinc-300">{file.name}</span>
-                <span className="shrink-0 text-zinc-500">{formatFileSize(file.size)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      {done ? (
+        <button
+          type="button"
+          onClick={() => onFilesSelected([])}
+          className="mt-3 text-center text-[11px] text-zinc-600 hover:text-zinc-400"
+        >
+          clear
+        </button>
+      ) : (
+        <div className="mt-3 h-4" />
+      )}
     </div>
   );
 }

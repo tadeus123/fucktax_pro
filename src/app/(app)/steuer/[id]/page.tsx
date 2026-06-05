@@ -14,5 +14,5 @@ export default async function SteuerPage({
     notFound();
   }
 
-  return <EmptyFilingView filing={filing} comingSoonLabel="Annual tax return" />;
+  return <EmptyFilingView filing={filing} />;
 }

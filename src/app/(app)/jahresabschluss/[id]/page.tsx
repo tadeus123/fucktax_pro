@@ -14,5 +14,5 @@ export default async function JahresabschlussPage({
     notFound();
   }
 
-  return <EmptyFilingView filing={filing} comingSoonLabel="Jahresabschluss" />;
+  return <EmptyFilingView filing={filing} />;
 }
