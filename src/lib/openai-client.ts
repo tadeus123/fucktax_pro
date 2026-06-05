@@ -16,7 +16,7 @@ function sleep(ms: number): Promise<void> {
 
 export async function chatCompletionsWithRetry(
   body: Omit<ChatCompletionBody, "model"> & { model?: string },
-  options?: { maxRetries?: number },
+  options?: { maxRetries?: number; onRetry?: (attempt: number, waitMs: number) => void },
 ): Promise<Response> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) throw new Error("OPENAI_API_KEY not configured");
@@ -40,7 +40,9 @@ export async function chatCompletionsWithRetry(
 
     const errText = await response.text();
     const waitMs = parseRetrySeconds(errText) + attempt * 500;
-    await sleep(Math.min(waitMs, 60000));
+    const capped = Math.min(waitMs, 60000);
+    options?.onRetry?.(attempt + 1, capped);
+    await sleep(capped);
   }
 
   throw new Error("OpenAI rate limit — retries exhausted");

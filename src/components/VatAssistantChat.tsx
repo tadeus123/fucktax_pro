@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { ChatActivityIndicator } from "@/components/ChatActivityIndicator";
 import { logClientChatEvent } from "@/lib/chat-logger-client";
 import { uploadFilingFiles } from "@/lib/upload";
 
@@ -117,8 +118,13 @@ export function VatAssistantChat({
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [activity, setActivity] = useState<string | null>(null);
 
   const displayMessages = visibleMessages(messages);
+  const showActivity = loading || sending || uploading || activity != null;
+  const activityLabel =
+    activity ??
+    (loading ? "Loading chat…" : uploading ? "Uploading files…" : sending ? "Sending…" : null);
 
   useEffect(() => {
     async function load() {
@@ -147,13 +153,63 @@ export function VatAssistantChat({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [displayMessages, sending]);
+  }, [displayMessages, showActivity]);
+
+  async function readStreamedAssistantResponse(response: Response): Promise<{
+    reply: string;
+    elsterUpdated?: boolean;
+    vatPayable?: number;
+  }> {
+    if (!response.body) {
+      throw new Error("Send failed");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line) as {
+          type: string;
+          message?: string;
+          error?: string;
+          reply?: string;
+          elsterUpdated?: boolean;
+          vatPayable?: number;
+        };
+
+        if (event.type === "status" && event.message) {
+          setActivity(event.message);
+        } else if (event.type === "error") {
+          throw new Error(event.error ?? "Send failed");
+        } else if (event.type === "done") {
+          return {
+            reply: event.reply ?? "",
+            elsterUpdated: event.elsterUpdated,
+            vatPayable: event.vatPayable,
+          };
+        }
+      }
+    }
+
+    throw new Error("Assistant ended without a reply");
+  }
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
 
     setSending(true);
+    setActivity("Sending…");
     setError("");
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
@@ -162,18 +218,16 @@ export function VatAssistantChat({
       const response = await fetch("/api/vat-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filingPeriodId, message: trimmed }),
+        body: JSON.stringify({ filingPeriodId, message: trimmed, stream: true }),
       });
-      const body = (await response.json()) as {
-        error?: string;
-        reply?: string;
-        elsterUpdated?: boolean;
-        vatPayable?: number;
-      };
+
       if (!response.ok) {
+        const body = (await response.json()) as { error?: string };
         throw new Error(body.error ?? "Send failed");
       }
-      setMessages((prev) => [...prev, { role: "assistant", content: body.reply ?? "" }]);
+
+      const body = await readStreamedAssistantResponse(response);
+      setMessages((prev) => [...prev, { role: "assistant", content: body.reply }]);
       if (body.elsterUpdated && body.vatPayable != null) {
         onElsterUpdated?.({ vatPayable: body.vatPayable });
       }
@@ -181,6 +235,7 @@ export function VatAssistantChat({
       setError(err instanceof Error ? err.message : "Send failed");
     } finally {
       setSending(false);
+      setActivity(null);
       inputRef.current?.focus();
     }
   }
@@ -197,6 +252,7 @@ export function VatAssistantChat({
     const docFiles = files.filter((f) => !bankExt.test(f.name));
 
     setUploading(true);
+    setActivity("Uploading files…");
     setError("");
     void logClientChatEvent(filingPeriodId, "client_upload", `${files.length} file(s)`, {
       documentCount: docFiles.length,
@@ -215,6 +271,7 @@ export function VatAssistantChat({
       }
 
       if (docFiles.length > 0) {
+        setActivity("Extracting invoice data…");
         await fetch("/api/process", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -228,36 +285,37 @@ export function VatAssistantChat({
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
+      if (!sending) setActivity(null);
     }
   }
 
   return (
     <div className="flex h-full flex-col">
       <div className="no-scrollbar flex-1 overflow-y-auto">
-        {!loading ? (
-          <div className="mx-auto max-w-2xl space-y-4 px-6 py-6">
-            {displayMessages.map((msg, index) => (
-              <div
-                key={msg.id ?? index}
-                className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}
-              >
-                {msg.role === "user" ? (
-                  <div className="max-w-[85%] rounded-2xl bg-zinc-100 px-4 py-2.5 text-[14px] leading-relaxed text-black">
-                    {msg.content}
-                  </div>
-                ) : (
-                  <div className="max-w-[92%] text-[14px] leading-relaxed text-zinc-300">
-                    {renderMarkdownLite(msg.content)}
-                  </div>
-                )}
-              </div>
-            ))}
-            {sending || uploading ? (
-              <p className="text-[13px] text-zinc-600">{uploading ? "Uploading…" : "…"}</p>
-            ) : null}
-            <div ref={bottomRef} />
-          </div>
-        ) : null}
+        <div className="mx-auto max-w-2xl space-y-4 px-6 py-6">
+          {!loading
+            ? displayMessages.map((msg, index) => (
+                <div
+                  key={msg.id ?? index}
+                  className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}
+                >
+                  {msg.role === "user" ? (
+                    <div className="max-w-[85%] rounded-2xl bg-zinc-100 px-4 py-2.5 text-[14px] leading-relaxed text-black">
+                      {msg.content}
+                    </div>
+                  ) : (
+                    <div className="max-w-[92%] text-[14px] leading-relaxed text-zinc-300">
+                      {renderMarkdownLite(msg.content)}
+                    </div>
+                  )}
+                </div>
+              ))
+            : null}
+          {showActivity && activityLabel ? (
+            <ChatActivityIndicator label={activityLabel} />
+          ) : null}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
       {error ? <p className="px-6 pb-2 text-[13px] text-red-400">{error}</p> : null}

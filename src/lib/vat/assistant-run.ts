@@ -1,4 +1,5 @@
 import { chatCompletionsWithRetry, getAssistantModel } from "@/lib/openai-client";
+import { toolStatusLabel } from "@/lib/vat/assistant-status";
 import { ASSISTANT_TOOLS } from "@/lib/vat/assistant-tools";
 import { executeAssistantTool } from "@/lib/vat/apply-actions";
 
@@ -53,6 +54,7 @@ export async function runAssistantWithTools(
   systemContent: string,
   history: Array<{ role: string; content: string }>,
   filingPeriodId: string,
+  onStatus?: (message: string) => void,
 ): Promise<AssistantRunResult> {
   const messages: ChatMessage[] = [
     { role: "system", content: systemContent },
@@ -66,12 +68,23 @@ export async function runAssistantWithTools(
   const maxRounds = 8;
 
   for (let round = 0; round < maxRounds; round += 1) {
-    const response = await chatCompletionsWithRetry({
-      temperature: 0.2,
-      messages,
-      tools: ASSISTANT_TOOLS,
-      tool_choice: "auto",
-    });
+    onStatus?.(
+      round === 0 ? "Analyzing with AI…" : `Analyzing with AI (step ${round + 1})…`,
+    );
+
+    const response = await chatCompletionsWithRetry(
+      {
+        temperature: 0.2,
+        messages,
+        tools: ASSISTANT_TOOLS,
+        tool_choice: "auto",
+      },
+      {
+        onRetry: (attempt, waitMs) => {
+          onStatus?.(`OpenAI rate limit — retrying in ${Math.ceil(waitMs / 1000)}s…`);
+        },
+      },
+    );
 
     if (!response.ok) {
       const errText = await response.text();
@@ -117,6 +130,8 @@ export async function runAssistantWithTools(
 
         const result = await executeAssistantTool(filingPeriodId, call.function.name, parsed);
         const ok = result.ok === true;
+
+        onStatus?.(toolStatusLabel(call.function.name, parsed));
 
         toolDetails.push({
           name: call.function.name,
