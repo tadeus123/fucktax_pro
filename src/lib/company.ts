@@ -37,7 +37,7 @@ export const COMPANY_NOTES: CompanyNote[] = [
       { kind: "text", value: "Gewerbesteuer (Dresden): 15.75% on profit." },
       {
         kind: "data",
-        value: "With Körperschaftsteuer → ~31.575% on profit (before dividends)",
+        value: "With Körperschaftsteuer → ~31.575% on profit.",
       },
     ],
   },

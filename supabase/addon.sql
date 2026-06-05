@@ -122,7 +122,7 @@ insert into public.company_lines (section_id, kind, value, sort_order) values
   (2, 'text', 'Körperschaftsteuer: 15% + Soli → 15.825% total.', 2),
   (3, 'text', 'Tax on GmbH profit.', 1),
   (3, 'text', 'Gewerbesteuer (Dresden): 15.75% on profit.', 2),
-  (3, 'data', 'With Körperschaftsteuer → ~31.575% on profit (before dividends)', 3),
+  (3, 'data', 'With Körperschaftsteuer → ~31.575% on profit.', 3),
   (4, 'text', 'We file quarterly.', 1),
   (4, 'text', 'Usually 19%, sometimes 7%, sometimes 0 — depends what we sell.', 2),
   (4, 'text', 'We collect VAT from customers. We pay VAT on purchases.', 3),
