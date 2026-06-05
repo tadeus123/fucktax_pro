@@ -434,3 +434,67 @@ export async function runIncrementalDocumentProcess(
     needsReview,
   };
 }
+
+/** Re-import bank CSV after chat upload. Replaces session bank lines, keeps documents. */
+export async function runIncrementalBankReimport(filingPeriodId: string): Promise<ProcessResult> {
+  const supabase = createSupabaseAdmin();
+
+  const { data: filing } = await supabase
+    .from("filing_periods")
+    .select("period_start, period_end")
+    .eq("id", filingPeriodId)
+    .maybeSingle();
+
+  if (!filing?.period_start || !filing?.period_end) {
+    throw new Error("Filing period not found.");
+  }
+
+  const { data: session } = await supabase
+    .from("upload_sessions")
+    .select("id")
+    .eq("filing_period_id", filingPeriodId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!session) throw new Error("No upload session.");
+
+  const { data: files } = await supabase
+    .from("uploaded_files")
+    .select("id, kind, storage_bucket, storage_path, original_filename, mime_type, created_at")
+    .eq("session_id", session.id)
+    .eq("kind", "bank")
+    .order("created_at", { ascending: false });
+
+  const bankFiles = (files ?? []) as UploadedFileRow[];
+  if (bankFiles.length === 0) {
+    throw new Error("No bank files in session.");
+  }
+
+  await supabase.from("bank_transactions").delete().eq("session_id", session.id);
+
+  const bankTransactions = await processBankFiles(
+    supabase,
+    session.id,
+    bankFiles,
+    filing.period_start,
+    filing.period_end,
+  );
+
+  const matched = await reconcileSession(supabase, session.id, filingPeriodId);
+
+  try {
+    const { buildElsterExport } = await import("@/lib/vat/export-elster");
+    await buildElsterExport(filingPeriodId);
+  } catch {
+    // optional
+  }
+
+  return {
+    sessionId: session.id,
+    documentsProcessed: 0,
+    bankTransactions,
+    matched,
+    needsReview: 0,
+  };
+}

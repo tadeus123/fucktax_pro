@@ -48,6 +48,7 @@ export function VatAssistantChat({
   const [todoUploadingId, setTodoUploadingId] = useState<string | null>(null);
   const [savingTodoKeys, setSavingTodoKeys] = useState<Set<string>>(new Set());
   const [resolvingTodoId, setResolvingTodoId] = useState<string | null>(null);
+  const assistantBusyRef = useRef(false);
 
   const displayMessages = visibleMessages(messages);
   const showActivity = loading || sending || uploading || activity != null;
@@ -212,14 +213,34 @@ export function VatAssistantChat({
     throw new Error("Assistant ended without a reply");
   }
 
-  async function sendMessage(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
+  async function waitForAssistantIdle(): Promise<void> {
+    while (assistantBusyRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
 
+  async function runProcess(body: Record<string, unknown>): Promise<void> {
+    const response = await fetch("/api/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error ?? "Processing failed");
+    }
+  }
+
+  async function postUserMessage(text: string, options?: { clearInput?: boolean }) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    await waitForAssistantIdle();
+    assistantBusyRef.current = true;
     setSending(true);
     setActivity("Sending…");
     setError("");
-    setInput("");
+    if (options?.clearInput !== false) setInput("");
     setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
 
     try {
@@ -242,10 +263,15 @@ export function VatAssistantChat({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Send failed");
     } finally {
+      assistantBusyRef.current = false;
       setSending(false);
       setActivity(null);
       inputRef.current?.focus();
     }
+  }
+
+  async function sendMessage(text: string) {
+    await postUserMessage(text);
   }
 
   async function uploadFiles(files: File[], todo?: FilingTodoItem) {
@@ -274,36 +300,39 @@ export function VatAssistantChat({
         stored += r.stored;
       }
 
+      if (stored === 0) {
+        throw new Error("No files were stored — try PDF, JPG, PNG, or bank CSV.");
+      }
+
       if (docFiles.length > 0) {
         setActivity("Extracting invoice data…");
-        await fetch("/api/process", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filingPeriodId, incremental: true }),
-        });
+        await runProcess({ filingPeriodId, incremental: true });
       }
+      if (bankFiles.length > 0) {
+        setActivity("Importing bank CSV…");
+        await runProcess({ filingPeriodId, bank: true });
+      }
+
+      const userMsg = todo
+        ? `Uploaded invoice for ${todo.vendor} (${stored} file(s)). Process and update ELSTER.`
+        : `Uploaded ${stored} file(s). Process and update ELSTER.`;
 
       if (todo) {
         await resolveTodo(todo.id, "uploaded");
-        const userMsg = `Uploaded invoice for ${todo.vendor} (${stored} file(s)). Process and update ELSTER.`;
-        await sendMessage(userMsg);
-      } else {
-        const userMsg = `Uploaded ${stored} file(s). Process and update ELSTER.`;
-        await sendMessage(userMsg);
       }
+      await postUserMessage(userMsg, { clearInput: false });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
       setTodoUploadingId(null);
       pendingTodoIdRef.current = null;
-      if (!sending) setActivity(null);
     }
   }
 
   async function handleChatUpload(event: ChangeEvent<HTMLInputElement>) {
     const fileList = event.target.files;
-    if (!fileList?.length || uploading || sending) return;
+    if (!fileList?.length || uploading) return;
     event.target.value = "";
     await uploadFiles(Array.from(fileList));
   }
@@ -311,7 +340,7 @@ export function VatAssistantChat({
   async function handleTodoUpload(event: ChangeEvent<HTMLInputElement>) {
     const fileList = event.target.files;
     const todoId = pendingTodoIdRef.current;
-    if (!fileList?.length || !todoId || uploading || sending) return;
+    if (!fileList?.length || !todoId || uploading) return;
 
     const todo = todos.find((t) => t.id === todoId);
     event.target.value = "";
@@ -363,6 +392,22 @@ export function VatAssistantChat({
         {error ? <p className="px-6 pb-2 text-[13px] text-red-400">{error}</p> : null}
 
         <div className="shrink-0 px-6 pb-6 pt-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.csv,.xlsx,.xls,.zip"
+            className="hidden"
+            onChange={(e) => void handleChatUpload(e)}
+          />
+          <input
+            ref={todoFileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"
+            className="hidden"
+            onChange={(e) => void handleTodoUpload(e)}
+          />
           <form
             className="mx-auto flex max-w-2xl items-center gap-2"
             onSubmit={(e) => {
@@ -370,24 +415,9 @@ export function VatAssistantChat({
               void sendMessage(input);
             }}
           >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => void handleChatUpload(e)}
-            />
-            <input
-              ref={todoFileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"
-              className="hidden"
-              onChange={(e) => void handleTodoUpload(e)}
-            />
             <button
               type="button"
-              disabled={loading || sending || uploading}
+              disabled={loading || uploading}
               onClick={() => fileInputRef.current?.click()}
               className="flex h-9 w-9 shrink-0 items-center justify-center text-zinc-600 transition hover:text-zinc-400 disabled:opacity-40"
               title="Add files"
