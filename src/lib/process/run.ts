@@ -4,6 +4,7 @@ import { extractDocument, shouldSkipDocumentFile, type DocumentExtraction } from
 import type { ProcessedDocumentSummary, ProcessResult } from "@/lib/process/types";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { inferSupplierFromFilename, matchesVendorPattern } from "@/lib/vat/vendor-match";
+import { autoApplyUploadedDocumentsToElster } from "@/lib/vat/auto-file-documents";
 
 type UploadedFileRow = {
   id: string;
@@ -705,6 +706,10 @@ export async function runIncrementalDocumentProcess(
   );
 
   const matched = await reconcileSession(supabase, session.id, filingPeriodId);
+  const { applied: elsterApplied } = await autoApplyUploadedDocumentsToElster(
+    filingPeriodId,
+    filesToProcess.map((f) => f.id),
+  );
   const matchFlags = await bankMatchFlagsForFiles(
     supabase,
     session.id,
@@ -720,9 +725,16 @@ export async function runIncrementalDocumentProcess(
     throw new Error(failures.join(" "));
   }
 
+  let vatPayable: number | undefined;
+  let inputVatDeductible: number | undefined;
+
   try {
     const { buildElsterExport } = await import("@/lib/vat/export-elster");
-    await buildElsterExport(filingPeriodId);
+    const pkg = await buildElsterExport(filingPeriodId);
+    if (pkg) {
+      vatPayable = pkg.rollup.vatPayable;
+      inputVatDeductible = pkg.rollup.inputVatDeductible;
+    }
   } catch {
     // optional
   }
@@ -735,6 +747,8 @@ export async function runIncrementalDocumentProcess(
     needsReview,
     skipped,
     failureCount: failures.length,
+    elsterApplied,
+    vatPayable,
     fileIds: filesToProcess.map((f) => f.id),
   });
 
@@ -746,6 +760,9 @@ export async function runIncrementalDocumentProcess(
     needsReview,
     recentDocuments,
     failures,
+    vatPayable,
+    inputVatDeductible,
+    elsterApplied,
   };
 }
 

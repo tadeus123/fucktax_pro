@@ -44,10 +44,17 @@ function deriveAmounts(doc: RollupDocument): { net: number; vat: number; rate: n
   const rate = doc.vatRate;
   let net = doc.netAmount ?? 0;
   let vat = doc.vatAmount ?? 0;
+  const vatCase = resolveVatCase(doc);
 
-  if (net === 0 && doc.grossAmount != null) {
+  if (net === 0 && vat === 0 && doc.grossAmount != null && doc.grossAmount > 0) {
     if (rate != null && rate > 0) {
       net = doc.grossAmount / (1 + rate / 100);
+      vat = doc.grossAmount - net;
+    } else if (vatCase === "de_supplier_19") {
+      net = doc.grossAmount / 1.19;
+      vat = doc.grossAmount - net;
+    } else if (vatCase === "de_supplier_7") {
+      net = doc.grossAmount / 1.07;
       vat = doc.grossAmount - net;
     } else if (vat > 0) {
       net = doc.grossAmount - vat;
@@ -100,7 +107,10 @@ export function shouldIncludeDocument(doc: RollupDocument): { include: boolean; 
   }
 
   if (SUPPLIER_CASES.includes(vatCase)) {
-    if (vat > 0 || (net > 0 && (vatCase === "de_supplier_19" || vatCase === "de_supplier_7"))) {
+    if (vat > 0 || net > 0) {
+      return { include: true };
+    }
+    if (doc.grossAmount != null && doc.grossAmount > 0) {
       return { include: true };
     }
     if (doc.confidence === "safe" || doc.confidence === "likely") {

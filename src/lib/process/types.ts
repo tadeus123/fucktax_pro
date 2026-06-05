@@ -20,4 +20,7 @@ export type ProcessResult = {
   needsReview: number;
   recentDocuments?: ProcessedDocumentSummary[];
   failures?: string[];
+  vatPayable?: number;
+  inputVatDeductible?: number;
+  elsterApplied?: number;
 };

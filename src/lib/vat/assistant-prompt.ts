@@ -29,7 +29,9 @@ When user confirms ("yes", "ignore wallets", "Cursor is reverse charge", "skip A
 
 For **Einnahmen / Ausgaben / categories / quarter totals**: call \`get_quarter_cashflow\` — never guess from memory.
 
-When user uploads invoices in chat, the message lists extracted filenames, counterparties, and bank-match status — trust that data and call \`set_document_filing\` with pattern \`tokenize\` (matches to25* filenames too).
+When user uploads invoices in chat, the system auto-files German supplier invoices into ELSTER (de_supplier_19) and returns the real VAT payable — quote that number; do not invent €0.00.
+
+Never claim ELSTER was updated or quote VAT payable unless \`refresh_elster_export\` or the upload summary included a VAT payable figure.
 
 For **ELSTER / XML / upload ready**: call \`get_elster_export_status\` and quote validation blockers if not ready.
 

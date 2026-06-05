@@ -242,6 +242,9 @@ export function VatAssistantChat({
     matched?: number;
     documentsProcessed?: number;
     failures?: string[];
+    vatPayable?: number;
+    inputVatDeductible?: number;
+    elsterApplied?: number;
   }> {
     const response = await fetch("/api/process", {
       method: "POST",
@@ -271,6 +274,9 @@ export function VatAssistantChat({
       matched?: number;
       documentsProcessed?: number;
       failures?: string[];
+      vatPayable?: number;
+      inputVatDeductible?: number;
+      elsterApplied?: number;
     },
   ): string {
     const docs = processResult.recentDocuments ?? [];
@@ -317,12 +323,23 @@ export function VatAssistantChat({
       return `- ${d.filename}: ${d.counterparty ?? "unknown supplier"}${amounts ? ` (${amounts})` : ""} — ${bank}${warn}`;
     });
 
+    const payableLine =
+      processResult.vatPayable != null
+        ? `ELSTER updated — VAT payable **€${processResult.vatPayable.toFixed(2)}** (input Vorsteuer €${(processResult.inputVatDeductible ?? 0).toFixed(2)}).`
+        : "";
+
     return [
       `Uploaded and extracted ${extracted.length} document(s):`,
       ...lines,
       "",
-      `Auto bank matches: ${processResult.matched ?? 0}. Search pattern "tokenize" (not only full legal name). Set de_supplier_19 and refresh_elster_export.`,
-    ].join("\n");
+      payableLine,
+      processResult.elsterApplied
+        ? `${processResult.elsterApplied} invoice(s) filed as de_supplier_19 in ELSTER rollup.`
+        : "",
+      `Auto bank matches: ${processResult.matched ?? 0}. Download ELSTER XML to verify Kz66/Kz98.`,
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   async function postUserMessage(
@@ -395,6 +412,9 @@ export function VatAssistantChat({
       result.processResult,
     );
     await postUserMessage(assistantMsg, { clearInput: false, skipUserBubble: true });
+    if (result.processResult.vatPayable != null) {
+      onElsterUpdated?.({ vatPayable: result.processResult.vatPayable });
+    }
   }
 
   async function uploadAndProcessFiles(files: File[]): Promise<{
@@ -404,6 +424,9 @@ export function VatAssistantChat({
       matched?: number;
       documentsProcessed?: number;
       failures?: string[];
+      vatPayable?: number;
+      inputVatDeductible?: number;
+      elsterApplied?: number;
     };
   } | null> {
     if (uploadingRef.current) {
@@ -436,6 +459,9 @@ export function VatAssistantChat({
         matched?: number;
         documentsProcessed?: number;
         failures?: string[];
+        vatPayable?: number;
+        inputVatDeductible?: number;
+        elsterApplied?: number;
       } = {};
       const uploadedDocIds: string[] = [];
 
