@@ -20,7 +20,6 @@ export type ParsedActionLine = {
   vendor: string;
   pattern: string;
   kind: FilingTodoKind;
-  autoAdd: boolean;
   metadata: Record<string, unknown>;
 };
 
@@ -101,7 +100,6 @@ export function parseActionableLines(content: string): ParsedActionLine[] {
       vendor,
       pattern: vendor.toLowerCase().split(/[:(]/)[0]?.trim() || vendor.toLowerCase(),
       kind,
-      autoAdd: kind === "invoice_recovery",
       metadata: extractRecoveryMetadata(display),
     });
   }

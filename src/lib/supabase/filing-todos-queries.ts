@@ -166,23 +166,3 @@ export async function deleteFilingTodo(id: string): Promise<boolean> {
   if (error) throw new Error(error.message);
   return true;
 }
-
-/** Only auto-add invoice recovery lines — manual + todo for everything else. */
-export async function syncAutoTodosFromMessage(
-  filingPeriodId: string,
-  content: string,
-  sourceMessageId?: string,
-): Promise<number> {
-  const { parseActionableLines, parsedLineToTodoInput } = await import("@/lib/filing-todos");
-  const lines = parseActionableLines(content).filter((line) => line.autoAdd);
-  let created = 0;
-
-  for (const line of lines) {
-    const result = await createFilingTodo({
-      ...parsedLineToTodoInput(line, filingPeriodId, sourceMessageId),
-    });
-    if (result?.created) created += 1;
-  }
-
-  return created;
-}
