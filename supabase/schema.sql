@@ -228,8 +228,8 @@ insert into public.filing_periods (
     '2025-10-01',
     '2025-12-31',
     null,
-    '2026-02-10',
-    'Due 10 Feb 2026',
+    '2026-01-12',
+    'Due 12 Jan 2026',
     'open',
     null,
     10
@@ -267,8 +267,8 @@ insert into public.filing_periods (
     '2025-01-01',
     '2025-12-31',
     'Geschäftsjahr 2025 (1 Jan – 31 Dec)',
-    '2026-03-31',
-    'Aufstellung due 31 Mar 2026',
+    '2026-06-30',
+    'Due 30 Jun 2026',
     'open',
     'Annual financial statements for 2025.',
     40
