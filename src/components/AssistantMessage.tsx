@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { renderMarkdownInline } from "@/lib/markdown-inline";
-import { parseActionableLines, todoItemKey, type FilingTodoItem } from "@/lib/filing-todos";
+import { parseActionableLines, todoKeyForItem, todoKeyFromLine, type FilingTodoItem } from "@/lib/filing-todos";
 
 function renderInline(part: string): ReactNode {
   return renderMarkdownInline(part);
@@ -11,15 +11,17 @@ function renderInline(part: string): ReactNode {
 export function AssistantMessage({
   content,
   todos,
+  savingKeys,
   onAddTodo,
 }: {
   content: string;
   todos: FilingTodoItem[];
+  savingKeys: Set<string>;
   onAddTodo: (line: ReturnType<typeof parseActionableLines>[number]) => void;
 }) {
   const actionable = parseActionableLines(content);
   const actionableByRaw = new Map(actionable.map((a) => [a.raw, a]));
-  const todoKeys = new Set(todos.map((t) => todoItemKey(t)));
+  const todoKeys = new Set(todos.map((t) => todoKeyForItem(t)));
 
   const lines = content.split("\n");
   const nodes: ReactNode[] = [];
@@ -77,12 +79,9 @@ export function AssistantMessage({
 
     const action = actionableByRaw.get(line.trim());
     if (action) {
-      const key = todoItemKey({
-        vendor: action.vendor,
-        pattern: action.pattern,
-        text: action.display,
-      });
+      const key = todoKeyFromLine(action);
       const inList = todoKeys.has(key);
+      const saving = savingKeys.has(key);
 
       nodes.push(
         <div
@@ -94,6 +93,8 @@ export function AssistantMessage({
           </p>
           {inList ? (
             <span className="shrink-0 pt-0.5 text-[11px] text-zinc-700">in todo</span>
+          ) : saving ? (
+            <span className="shrink-0 pt-0.5 text-[11px] text-zinc-700">saving…</span>
           ) : (
             <button
               type="button"

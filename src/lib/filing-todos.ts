@@ -10,6 +10,7 @@ export type FilingTodoItem = {
   kind: FilingTodoKind;
   status: FilingTodoStatus;
   createdAt: string;
+  itemKey?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -109,7 +110,18 @@ export function parseActionableLines(content: string): ParsedActionLine[] {
 }
 
 export function todoItemKey(item: Pick<FilingTodoItem, "vendor" | "pattern" | "text">): string {
-  return `${item.pattern}::${item.vendor}::${item.text.slice(0, 80)}`.toLowerCase();
+  const pattern = (item.pattern || item.vendor).toLowerCase().trim();
+  const text = item.text.toLowerCase().replace(/\s+/g, " ").trim();
+  return `${pattern}::${text}`;
+}
+
+export function todoKeyForItem(item: FilingTodoItem): string {
+  if (item.itemKey) return item.itemKey;
+  return todoItemKey(item);
+}
+
+export function todoKeyFromLine(line: Pick<ParsedActionLine, "vendor" | "pattern" | "display">): string {
+  return todoItemKey({ vendor: line.vendor, pattern: line.pattern, text: line.display });
 }
 
 export function parsedLineToTodoInput(
@@ -131,7 +143,7 @@ export function parsedLineToTodoInput(
     vendor: line.vendor,
     pattern: line.pattern,
     kind: line.kind,
-    metadata: line.metadata,
+    metadata: { ...line.metadata, itemKey: todoKeyFromLine(line) },
     sourceMessageId,
   };
 }

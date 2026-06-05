@@ -7,7 +7,8 @@ import { FilingTodoPanel } from "@/components/FilingTodoPanel";
 import { logClientChatEvent } from "@/lib/chat-logger-client";
 import {
   parsedLineToTodoInput,
-  todoItemKey,
+  todoKeyForItem,
+  todoKeyFromLine,
   type FilingTodoItem,
   type ParsedActionLine,
 } from "@/lib/filing-todos";
@@ -45,6 +46,8 @@ export function VatAssistantChat({
   const [activity, setActivity] = useState<string | null>(null);
   const [todos, setTodos] = useState<FilingTodoItem[]>([]);
   const [todoUploadingId, setTodoUploadingId] = useState<string | null>(null);
+  const [savingTodoKeys, setSavingTodoKeys] = useState<Set<string>>(new Set());
+  const [resolvingTodoId, setResolvingTodoId] = useState<string | null>(null);
 
   const displayMessages = visibleMessages(messages);
   const showActivity = loading || sending || uploading || activity != null;
@@ -52,16 +55,24 @@ export function VatAssistantChat({
     activity ??
     (loading ? "Loading chat…" : uploading ? "Uploading files…" : sending ? "Sending…" : null);
 
-  const refreshTodos = useCallback(async () => {
+  const refreshTodos = useCallback(async (): Promise<FilingTodoItem[]> => {
     try {
       const response = await fetch(
         `/api/filing-todos?filingPeriodId=${encodeURIComponent(filingPeriodId)}`,
       );
-      const body = (await response.json()) as { todos?: FilingTodoItem[] };
-      if (response.ok) setTodos(body.todos ?? []);
+      const body = (await response.json()) as { todos?: FilingTodoItem[]; error?: string };
+      if (response.ok) {
+        const next = body.todos ?? [];
+        setTodos(next);
+        return next;
+      }
+      if (body.error?.includes("filing_todos")) {
+        setError("Run supabase/filing-todos.sql to enable persistent todos.");
+      }
     } catch {
-      /* table may not exist yet */
+      /* network */
     }
+    return [];
   }, [filingPeriodId]);
 
   useEffect(() => {
@@ -95,42 +106,60 @@ export function VatAssistantChat({
 
   const addTodo = useCallback(
     async (line: ParsedActionLine) => {
+      const key = todoKeyFromLine(line);
+      if (savingTodoKeys.has(key) || todos.some((t) => todoKeyForItem(t) === key)) return;
+
+      setSavingTodoKeys((prev) => new Set(prev).add(key));
+      setError("");
       try {
         const response = await fetch("/api/filing-todos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(parsedLineToTodoInput(line, filingPeriodId)),
         });
-        const body = (await response.json()) as { todo?: FilingTodoItem };
-        if (response.ok && body.todo) {
-          setTodos((prev) => {
-            const key = todoItemKey(body.todo!);
-            if (prev.some((t) => todoItemKey(t) === key)) return prev;
-            return [...prev, body.todo!];
-          });
+        const body = (await response.json()) as { todo?: FilingTodoItem; error?: string };
+        if (!response.ok || !body.todo) {
+          throw new Error(body.error ?? "Could not save todo");
         }
-      } catch {
-        setError("Could not save todo — run supabase/filing-todos.sql");
+        await refreshTodos();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not save todo");
+      } finally {
+        setSavingTodoKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
       }
     },
-    [filingPeriodId],
+    [filingPeriodId, refreshTodos, savingTodoKeys, todos],
   );
 
-  const removeTodo = useCallback(
-    async (id: string, status: "uploaded" | "not_found") => {
-      setTodos((prev) => prev.filter((t) => t.id !== id));
+  const resolveTodo = useCallback(
+    async (id: string, status: "uploaded" | "not_found" | "done") => {
+      setResolvingTodoId(id);
+      setError("");
       try {
-        await fetch(`/api/filing-todos/${id}`, {
+        const response = await fetch(`/api/filing-todos/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status }),
         });
-      } catch {
-        /* ignore */
+        const body = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(body.error ?? "Could not update todo");
+        }
+        await refreshTodos();
+        void logClientChatEvent(filingPeriodId, "client_quick_prompt", `todo_${status}`, {
+          todoId: id,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not update todo");
+      } finally {
+        setResolvingTodoId(null);
       }
-      void logClientChatEvent(filingPeriodId, "client_quick_prompt", `todo_${status}`, { todoId: id });
     },
-    [filingPeriodId],
+    [filingPeriodId, refreshTodos],
   );
 
   async function readStreamedAssistantResponse(response: Response): Promise<{
@@ -255,7 +284,7 @@ export function VatAssistantChat({
       }
 
       if (todo) {
-        removeTodo(todo.id, "uploaded");
+        await resolveTodo(todo.id, "uploaded");
         const userMsg = `Uploaded invoice for ${todo.vendor} (${stored} file(s)). Process and update ELSTER.`;
         await sendMessage(userMsg);
       } else {
@@ -317,6 +346,7 @@ export function VatAssistantChat({
                         <AssistantMessage
                           content={msg.content}
                           todos={todos}
+                          savingKeys={savingTodoKeys}
                           onAddTodo={(line) => void addTodo(line)}
                         />
                       </div>
@@ -386,8 +416,10 @@ export function VatAssistantChat({
       <FilingTodoPanel
         items={todos}
         uploadingId={todoUploadingId}
+        resolvingId={resolvingTodoId}
         onUpload={startTodoUpload}
-        onNotFound={(id) => void removeTodo(id, "not_found")}
+        onNotFound={(id) => void resolveTodo(id, "not_found")}
+        onDone={(id) => void resolveTodo(id, "done")}
       />
     </div>
   );
