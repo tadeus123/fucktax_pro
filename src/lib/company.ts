@@ -27,13 +27,14 @@ export const COMPANY_NOTES: CompanyNote[] = [
     title: "Körperschaftsteuer (Germany taxes)",
     lines: [
       { kind: "text", value: "Tax on GmbH profit." },
-      { kind: "text", value: "15% + Soli 0.825% → 15.825% total." },
+      { kind: "text", value: "Körperschaftsteuer: 15% + Soli → 15.825% total." },
     ],
   },
   {
     title: "Gewerbesteuer (Dresden Taxes)",
     lines: [
-      { kind: "text", value: "Dresden GmbH: 15.75% on profit." },
+      { kind: "text", value: "Tax on GmbH profit." },
+      { kind: "text", value: "Gewerbesteuer (Dresden): 15.75% on profit." },
       {
         kind: "data",
         value: "With Körperschaftsteuer → ~31.575% on profit (before dividends)",
