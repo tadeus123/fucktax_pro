@@ -34,7 +34,6 @@ export const COMPANY_NOTES: CompanyNote[] = [
     title: "Gewerbesteuer (Dresden Taxes)",
     lines: [
       { kind: "text", value: "Dresden GmbH: 15.75% on profit." },
-      { kind: "data", value: "Finanzamt Dresden Nord · BFN 3202" },
       {
         kind: "data",
         value: "With Körperschaftsteuer → ~31.575% on profit (before dividends)",
@@ -82,6 +81,7 @@ export const COMPANY_NOTES: CompanyNote[] = [
       { kind: "data", value: "Sebnitzer Str. 35 · 01099 Dresden" },
       { kind: "data", value: "Tadeus Mehl & Konstantin Saifoulline · 50/50" },
       { kind: "data", value: "Share capital 25,000 EUR" },
+      { kind: "data", value: "Finanzamt Dresden Nord · BFN 3202" },
       { kind: "data", value: "Finom · DE93 1001 8000 0392 6629 11" },
       { kind: "data", value: "BIC FNOMDEB2" },
     ],
