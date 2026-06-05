@@ -6,6 +6,7 @@ type FilingPeriodRow = {
   id: string;
   filing_type: "vat" | "jahresabschluss" | "steuer";
   label: string;
+  sidebar_label: string | null;
   period_start: string | null;
   period_end: string | null;
   period_label: string | null;
@@ -48,6 +49,10 @@ function filingHref(row: FilingPeriodRow): string {
   return `/${base}/${row.route_segment}`;
 }
 
+function sidebarLabel(row: FilingPeriodRow): string {
+  return row.sidebar_label?.trim() || row.label;
+}
+
 function rowToVatFiling(row: FilingPeriodRow): VatFiling {
   return {
     id: row.id,
@@ -85,7 +90,7 @@ export async function getSidebarFilings(): Promise<SidebarFiling[]> {
 
   return (data as FilingPeriodRow[]).map((row) => ({
     href: filingHref(row),
-    label: row.label,
+    label: sidebarLabel(row),
     deadline: row.deadline,
     filingType: row.filing_type,
   }));

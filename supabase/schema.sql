@@ -35,6 +35,7 @@ create table public.filing_periods (
   id text primary key,
   filing_type public.filing_type not null,
   label text not null,
+  sidebar_label text,
   period_start date,
   period_end date,
   period_label text,
@@ -212,6 +213,7 @@ insert into public.filing_periods (
   id,
   filing_type,
   label,
+  sidebar_label,
   period_start,
   period_end,
   period_label,
@@ -224,6 +226,7 @@ insert into public.filing_periods (
   (
     'q4-2025',
     'vat',
+    'Q4 2025',
     'Q4 2025',
     '2025-10-01',
     '2025-12-31',
@@ -238,6 +241,7 @@ insert into public.filing_periods (
     'q1-2026',
     'vat',
     'Q1 2026',
+    'Q1 2026',
     '2026-01-01',
     '2026-03-31',
     null,
@@ -251,6 +255,7 @@ insert into public.filing_periods (
     'q2-2026',
     'vat',
     'Q2 2026',
+    'Q2 2026',
     '2026-04-01',
     '2026-06-30',
     null,
@@ -263,6 +268,7 @@ insert into public.filing_periods (
   (
     '2025-ja',
     'jahresabschluss',
+    'Jahresabschluss 2025',
     'JA 2025',
     '2025-01-01',
     '2025-12-31',
@@ -276,6 +282,7 @@ insert into public.filing_periods (
   (
     '2025-steuer',
     'steuer',
+    'Annual tax return 2025',
     'Tax 2025',
     null,
     null,
@@ -288,6 +295,7 @@ insert into public.filing_periods (
   )
 on conflict (id) do update set
   label = excluded.label,
+  sidebar_label = excluded.sidebar_label,
   period_start = excluded.period_start,
   period_end = excluded.period_end,
   period_label = excluded.period_label,
