@@ -27,7 +27,7 @@ export const COMPANY_NOTES: CompanyNote[] = [
     ],
   },
   {
-    title: "Körperschaftsteuer",
+    title: "Körperschaftsteuer (Germany taxes)",
     lines: [
       { kind: "text", value: "Tax on GmbH profit." },
       { kind: "text", value: "15% + Soli 0.825% → 15.825% total." },
@@ -38,7 +38,7 @@ export const COMPANY_NOTES: CompanyNote[] = [
     ],
   },
   {
-    title: "Gewerbesteuer",
+    title: "Gewerbesteuer (Dresden Taxes)",
     lines: [
       { kind: "text", value: "Dresden GmbH: 15.75% on profit." },
       { kind: "data", value: "Finanzamt Dresden Nord · BFN 3202" },
