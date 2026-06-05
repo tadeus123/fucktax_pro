@@ -1,4 +1,10 @@
+import { USTVA_2025_FIELDS } from "@/lib/vat/ustva-field-mapping";
+
 export type ElsterFieldMap = Record<string, number>;
+
+export function roundEuro(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 export type VatRollupResult = {
   outputNet19: number;
@@ -19,28 +25,15 @@ export type VatRollupResult = {
   warnings: string[];
 };
 
-export function roundEuro(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 export function buildElsterFieldMap(rollup: Omit<VatRollupResult, "elsterFields">): ElsterFieldMap {
   const fields: ElsterFieldMap = {};
 
-  if (rollup.outputNet19 > 0) fields.Kz81 = roundEuro(rollup.outputNet19);
-  if (rollup.outputTax19 > 0) fields.Kz86 = roundEuro(rollup.outputTax19);
-  if (rollup.outputNet7 > 0) fields.Kz35 = roundEuro(rollup.outputNet7);
-  if (rollup.outputTax7 > 0) fields.Kz36 = roundEuro(rollup.outputTax7);
-
-  if (rollup.reverseChargeNetEu > 0) fields.Kz46 = roundEuro(rollup.reverseChargeNetEu);
-  if (rollup.reverseChargeTaxEu > 0) fields.Kz47 = roundEuro(rollup.reverseChargeTaxEu);
-  if (rollup.reverseChargeNetNonEu > 0) fields.Kz84 = roundEuro(rollup.reverseChargeNetNonEu);
-  if (rollup.reverseChargeTaxNonEu > 0) fields.Kz85 = roundEuro(rollup.reverseChargeTaxNonEu);
-
-  if (rollup.inputVatDeductible > 0) fields.Kz66 = roundEuro(rollup.inputVatDeductible);
-  if (rollup.reverseChargeInputVat > 0) fields.Kz67 = roundEuro(rollup.reverseChargeInputVat);
-
-  const payable = roundEuro(rollup.vatPayable);
-  if (payable !== 0) fields.Kz83 = payable;
+  for (const def of USTVA_2025_FIELDS) {
+    const value = rollup[def.rollupKey];
+    if (value == null || value === 0) continue;
+    if (def.kind === "payable" && value === 0) continue;
+    fields[def.kz] = roundEuro(value);
+  }
 
   return fields;
 }
@@ -122,37 +115,4 @@ export function formatElsterCsv(fields: ElsterFieldMap, meta: { label: string; y
     }
   }
   return lines.join("\n");
-}
-
-export function formatElsterXml(
-  fields: ElsterFieldMap,
-  meta: { year: string; period: string; steuernummer: string },
-): string {
-  const kzLines = ELSTER_KZ_ORDER.filter((k) => {
-    const v = fields[k];
-    return v != null && v !== 0;
-  })
-    .map((k) => `              <${k}>${fields[k]!.toFixed(2)}</${k}>`)
-    .join("\n");
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Elster xmlns="http://www.elster.de/elsterxml/schema/v11">
-  <DatenTeil>
-    <Nutzdatenblock>
-      <Nutzdaten>
-        <Anmeldungssteuern xmlns="http://finkonsens.de/elster/elsteranmeldung/ustva/v2025" version="2025">
-          <Steuerfall>
-            <Umsatzsteuervoranmeldung>
-              <Jahr>${meta.year}</Jahr>
-              <Zeitraum>${meta.period}</Zeitraum>
-              <Steuernummer>${meta.steuernummer}</Steuernummer>
-${kzLines}
-            </Umsatzsteuervoranmeldung>
-          </Steuerfall>
-        </Anmeldungssteuern>
-      </Nutzdaten>
-    </Nutzdatenblock>
-  </DatenTeil>
-</Elster>
-`;
 }

@@ -29,7 +29,16 @@ export async function GET(request: NextRequest) {
       includedDocuments: pkg.rollup.includedDocuments,
       excludedDocuments: pkg.rollup.excludedDocuments,
       warnings: pkg.rollup.warnings,
+      validationErrors: pkg.validationErrors,
+      exportReady: pkg.exportReady,
     });
+  }
+
+  if (!pkg.exportReady && format === "xml") {
+    return NextResponse.json(
+      { error: "Export blocked", validationErrors: pkg.validationErrors },
+      { status: 422 },
+    );
   }
 
   if (format === "csv") {
@@ -41,10 +50,10 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  return new NextResponse(pkg.xml, {
+  return new NextResponse(new Uint8Array(pkg.xmlBuffer), {
     headers: {
-      "Content-Type": "application/xml; charset=utf-8",
-      "Content-Disposition": `attachment; filename="ustva-${safeName}.xml"`,
+      "Content-Type": "application/xml; charset=ISO-8859-15",
+      "Content-Disposition": `attachment; filename="ustva-${safeName}-mein-elster.xml"`,
     },
   });
 }
@@ -62,12 +71,16 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({
-    ok: true,
+    ok: pkg.exportReady,
     vatPayable: pkg.rollup.vatPayable,
     elsterFields: pkg.rollup.elsterFields,
     includedDocuments: pkg.rollup.includedDocuments,
     excludedDocuments: pkg.rollup.excludedDocuments,
     warnings: pkg.rollup.warnings,
-    downloadUrl: `/api/elster/export?filingPeriodId=${encodeURIComponent(filingPeriodId)}&format=xml`,
+    validationErrors: pkg.validationErrors,
+    exportReady: pkg.exportReady,
+    downloadUrl: pkg.exportReady
+      ? `/api/elster/export?filingPeriodId=${encodeURIComponent(filingPeriodId)}&format=xml`
+      : null,
   });
 }

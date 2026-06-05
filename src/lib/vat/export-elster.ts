@@ -6,9 +6,13 @@ import {
 import {
   elsterQuarterCode,
   formatElsterCsv,
-  formatElsterXml,
   normalizeSteuernummer,
 } from "@/lib/vat/elster-fields";
+import {
+  buildUstvaImportXml,
+  encodeUstvaXml,
+  validateUstvaExport,
+} from "@/lib/vat/ustva-xml";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 
 export type ElsterExportPackage = {
@@ -19,7 +23,10 @@ export type ElsterExportPackage = {
   steuernummer: string;
   rollup: ReturnType<typeof computeVatRollup>;
   xml: string;
+  xmlBuffer: Buffer;
   csv: string;
+  validationErrors: string[];
+  exportReady: boolean;
 };
 
 function steuernummerFromEnv(): string {
@@ -109,8 +116,20 @@ export async function buildElsterExport(filingPeriodId: string): Promise<ElsterE
 
   if (!session) return null;
 
-  const documents = await loadRollupDocuments(filingPeriodId);
-  const bankEntries = await loadConfirmedBankEntries(session.id);
+  const [{ data: reviewRows }, documents, bankEntries] = await Promise.all([
+    supabase
+      .from("document_records")
+      .select("confidence, gross_amount, document_type, warning")
+      .eq("filing_period_id", filingPeriodId),
+    loadRollupDocuments(filingPeriodId),
+    loadConfirmedBankEntries(session.id),
+  ]);
+
+  const { data: allBankLines } = await supabase
+    .from("bank_transactions")
+    .select("amount, reconciliation_status, user_confirmed")
+    .eq("session_id", session.id);
+
   const rollup = computeVatRollup(documents, bankEntries);
 
   const year = filing.period_start.slice(0, 4);
@@ -119,7 +138,43 @@ export async function buildElsterExport(filingPeriodId: string): Promise<ElsterE
 
   const meta = { year, period: elsterPeriod, steuernummer, label: filing.label };
 
-  const xml = formatElsterXml(rollup.elsterFields, meta);
+  const validationErrors = validateUstvaExport({
+    year,
+    period: elsterPeriod,
+    steuernummer,
+    fields: rollup.elsterFields,
+  });
+
+  const needsReview = (reviewRows ?? []).filter(
+    (row) =>
+      row.confidence === "review" ||
+      row.confidence === "do_not_deduct" ||
+      row.gross_amount == null,
+  ).length;
+  if (needsReview > 0) {
+    validationErrors.push(
+      `${needsReview} document(s) still need review — resolve red flags before ELSTER import.`,
+    );
+  }
+
+  const unresolvedIncome = (allBankLines ?? []).filter(
+    (line) =>
+      Number(line.amount) > 0 &&
+      line.reconciliation_status !== "matched" &&
+      !line.user_confirmed,
+  ).length;
+  if (unresolvedIncome > 0) {
+    validationErrors.push(
+      `${unresolvedIncome} incoming bank transaction(s) without invoice or chat confirmation.`,
+    );
+  }
+
+  if (rollup.warnings.some((w) => w.includes("No output VAT"))) {
+    validationErrors.push("Output VAT check failed — verify customer invoices before ELSTER import.");
+  }
+
+  const xml = buildUstvaImportXml(rollup.elsterFields, meta);
+  const xmlBuffer = encodeUstvaXml(xml);
   const csv = formatElsterCsv(rollup.elsterFields, {
     label: filing.label,
     year,
@@ -150,6 +205,9 @@ export async function buildElsterExport(filingPeriodId: string): Promise<ElsterE
     steuernummer,
     rollup,
     xml,
+    xmlBuffer,
     csv,
+    validationErrors,
+    exportReady: validationErrors.length === 0,
   };
 }

@@ -28,9 +28,15 @@ export function ReviewView({
       const previewBody = (await preview.json()) as {
         error?: string;
         vatPayable?: number;
+        validationErrors?: string[];
+        exportReady?: boolean;
       };
       if (!preview.ok) {
-        throw new Error(previewBody.error ?? "Export failed");
+        const detail = previewBody.validationErrors?.join(" ") ?? previewBody.error ?? "Export failed";
+        throw new Error(detail);
+      }
+      if (previewBody.exportReady === false) {
+        throw new Error(previewBody.validationErrors?.join(" ") ?? "Export not ready");
       }
 
       void logClientChatEvent(filingPeriodId, "client_elster_download", "xml", {
@@ -49,14 +55,19 @@ export function ReviewView({
     <div className="flex h-screen flex-col overflow-hidden bg-black">
       <header className="flex shrink-0 items-center justify-between px-6 py-4">
         <h1 className="text-[13px] text-zinc-500">{data.filingLabel}</h1>
-        <button
-          type="button"
-          disabled={exporting}
-          onClick={() => void downloadElster()}
-          className="text-[13px] text-zinc-400 transition hover:text-white disabled:opacity-40"
-        >
-          {exporting ? "…" : "ELSTER XML"}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            type="button"
+            disabled={exporting}
+            onClick={() => void downloadElster()}
+            className="text-[13px] text-zinc-400 transition hover:text-white disabled:opacity-40"
+          >
+            {exporting ? "…" : "ELSTER XML"}
+          </button>
+          <p className="max-w-xs text-right text-[11px] text-zinc-600">
+            Mein ELSTER import only — upload XML, check fields, do not submit until reviewed.
+          </p>
+        </div>
       </header>
 
       {exportError ? (
