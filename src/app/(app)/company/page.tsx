@@ -1,5 +1,7 @@
 import { CompanyView } from "@/components/CompanyView";
+import { getCompanyContent } from "@/lib/supabase/queries";
 
-export default function CompanyPage() {
-  return <CompanyView />;
+export default async function CompanyPage() {
+  const content = await getCompanyContent();
+  return <CompanyView content={content} />;
 }

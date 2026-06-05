@@ -2,13 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  formatShortDeadline,
-  getDeadlineTone,
-  JAHRESABSCHLUSS,
-  STEUERERKLAERUNG,
-  VAT_FILINGS,
-} from "@/lib/filings";
+import { formatShortDeadline, getDeadlineTone } from "@/lib/filings";
+import type { SidebarFiling } from "@/lib/supabase/queries";
 
 const deadlineToneClass = {
   overdue: "text-red-500",
@@ -49,9 +44,12 @@ function NavLink({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ filings }: { filings: SidebarFiling[] }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  const vat = filings.filter((f) => f.filingType === "vat");
+  const other = filings.filter((f) => f.filingType !== "vat");
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -63,46 +61,37 @@ export function Sidebar() {
     <aside className="flex w-40 shrink-0 flex-col justify-between border-r border-zinc-900 px-5 py-8">
       <nav className="space-y-4">
         <div className="space-y-1">
-          {VAT_FILINGS.map((filing) => (
+          {vat.map((filing) => (
             <NavLink
-              key={filing.id}
-              href={`/vat/${filing.id}`}
+              key={filing.href}
+              href={filing.href}
               label={filing.label}
               deadline={filing.deadline}
-              active={pathname === `/vat/${filing.id}`}
+              active={pathname === filing.href}
             />
           ))}
         </div>
 
-        <div className="space-y-1 border-t border-zinc-900 pt-4">
-          {JAHRESABSCHLUSS.map((filing) => (
-            <NavLink
-              key={filing.id}
-              href={`/jahresabschluss/${filing.id}`}
-              label="JA 2025"
-              deadline={filing.deadline}
-              active={pathname === `/jahresabschluss/${filing.id}`}
-            />
-          ))}
-          {STEUERERKLAERUNG.map((filing) => (
-            <NavLink
-              key={filing.id}
-              href={`/steuer/${filing.id}`}
-              label="Tax 2025"
-              deadline={filing.deadline}
-              active={pathname === `/steuer/${filing.id}`}
-            />
-          ))}
-        </div>
+        {other.length > 0 ? (
+          <div className="space-y-1 border-t border-zinc-900 pt-4">
+            {other.map((filing) => (
+              <NavLink
+                key={filing.href}
+                href={filing.href}
+                label={filing.label}
+                deadline={filing.deadline}
+                active={pathname === filing.href}
+              />
+            ))}
+          </div>
+        ) : null}
       </nav>
 
       <div className="space-y-1">
         <Link
           href="/company"
           className={`block py-1.5 text-[11px] transition ${
-            pathname === "/company"
-              ? "text-zinc-400"
-              : "text-zinc-700 hover:text-zinc-500"
+            pathname === "/company" ? "text-zinc-400" : "text-zinc-700 hover:text-zinc-500"
           }`}
         >
           company

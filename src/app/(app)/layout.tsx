@@ -1,9 +1,12 @@
 import { Sidebar } from "@/components/Sidebar";
+import { getSidebarFilings } from "@/lib/supabase/queries";
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  const filings = await getSidebarFilings();
+
   return (
     <div className="flex h-screen overflow-hidden bg-black">
-      <Sidebar />
+      <Sidebar filings={filings} />
       <main className="min-w-0 flex-1 overflow-auto">{children}</main>
     </div>
   );
