@@ -667,7 +667,7 @@ export function VatAssistantChat({
                   ))}
                 </div>
               ) : null}
-              <div className="flex items-end gap-1 px-2 py-2">
+              <div className="flex min-h-[44px] items-center gap-1 px-3 py-2">
                 <button
                   type="button"
                   disabled={composerBusy}
@@ -675,7 +675,7 @@ export function VatAssistantChat({
                     setError("");
                     fileInputRef.current?.click();
                   }}
-                  className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center text-zinc-600 transition hover:text-zinc-400 disabled:opacity-40"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center text-[18px] leading-none text-zinc-600 transition hover:text-zinc-400 disabled:opacity-40"
                   title="Add files"
                 >
                   +
@@ -693,12 +693,12 @@ export function VatAssistantChat({
                   }}
                   placeholder="Message"
                   disabled={composerBusy}
-                  className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-1 py-2 text-[14px] leading-relaxed text-white outline-none placeholder:text-zinc-700 disabled:opacity-40"
+                  className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent px-1 py-0 text-[14px] leading-5 text-white outline-none placeholder:text-zinc-700 disabled:opacity-40"
                 />
                 <button
                   type="submit"
                   disabled={!canSend}
-                  className="mb-1 shrink-0 px-2 text-[13px] text-zinc-500 transition hover:text-white disabled:opacity-30"
+                  className="flex h-8 shrink-0 items-center px-2 text-[13px] leading-none text-zinc-500 transition hover:text-white disabled:opacity-30"
                 >
                   Send
                 </button>
