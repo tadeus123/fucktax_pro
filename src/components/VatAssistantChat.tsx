@@ -20,6 +20,27 @@ type ChatMessage = {
   content: string;
 };
 
+type PendingAttachment = {
+  id: string;
+  file: File;
+  previewUrl: string | null;
+};
+
+function isSupportedChatFile(name: string): boolean {
+  return /\.(pdf|jpg|jpeg|png|heic|webp|zip|csv|xlsx|xls|ofx|qif|mt940|sta)$/i.test(name);
+}
+
+function isImageFile(name: string): boolean {
+  return /\.(jpg|jpeg|png|heic|webp|gif)$/i.test(name);
+}
+
+function shortFileName(name: string, max = 28): string {
+  if (name.length <= max) return name;
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
+  const base = name.slice(0, max - ext.length - 1);
+  return `${base}…${ext}`;
+}
+
 function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
   const firstUserIndex = messages.findIndex((m) => m.role === "user");
   if (firstUserIndex === -1) return [];
@@ -35,10 +56,11 @@ export function VatAssistantChat({
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [activity, setActivity] = useState<string | null>(null);
@@ -272,14 +294,32 @@ export function VatAssistantChat({
     }
   }
 
-  async function sendMessage(text: string) {
-    await postUserMessage(text);
+  async function sendMessage(text: string, files: File[] = []) {
+    const trimmed = text.trim();
+    if (!trimmed && files.length === 0) return;
+
+    if (files.length === 0) {
+      await postUserMessage(trimmed);
+      return;
+    }
+
+    const fileNames = files.map((f) => f.name);
+    const attachLine = fileNames.join(", ");
+    const userBubble = trimmed ? `${trimmed}\n\n${attachLine}` : attachLine;
+
+    setMessages((prev) => [...prev, { role: "user", content: userBubble }]);
+
+    const stored = await uploadAndProcessFiles(files);
+    if (stored === null) return;
+
+    const assistantMsg = trimmed || `Uploaded ${stored} file(s). Process and update ELSTER.`;
+    await postUserMessage(assistantMsg, { clearInput: false, skipUserBubble: true });
   }
 
-  async function uploadFiles(files: File[]) {
+  async function uploadAndProcessFiles(files: File[]): Promise<number | null> {
     if (uploadingRef.current) {
       setError("Upload already in progress — wait for it to finish.");
-      return;
+      return null;
     }
 
     const bankExt = /\.(csv|xlsx|xls|ofx|qif|mt940|sta)$/i;
@@ -288,7 +328,7 @@ export function VatAssistantChat({
 
     if (docFiles.length === 0 && bankFiles.length === 0) {
       setError("No supported files selected (PDF, images, or bank CSV).");
-      return;
+      return null;
     }
 
     uploadingRef.current = true;
@@ -299,8 +339,6 @@ export function VatAssistantChat({
       documentCount: docFiles.length,
       bankCount: bankFiles.length,
     });
-
-    let userMsg = "";
 
     try {
       let stored = 0;
@@ -328,30 +366,80 @@ export function VatAssistantChat({
         await runProcess({ filingPeriodId, bank: true });
       }
 
-      userMsg = `Uploaded ${stored} file(s). Process and update ELSTER.`;
-
-      setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+      return stored;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
-      return;
+      return null;
     } finally {
       uploadingRef.current = false;
       setUploading(false);
       setActivity(null);
     }
-
-    if (userMsg) {
-      void postUserMessage(userMsg, { clearInput: false, skipUserBubble: true });
-    }
   }
 
-  async function handleChatUpload(event: ChangeEvent<HTMLInputElement>) {
+  function revokeAttachmentPreview(attachment: PendingAttachment) {
+    if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+  }
+
+  function addPendingFiles(incoming: File[]) {
+    const accepted = incoming.filter((f) => isSupportedChatFile(f.name));
+    if (accepted.length === 0) {
+      setError("No supported files selected (PDF, images, or bank CSV).");
+      return;
+    }
+    if (accepted.length < incoming.length) {
+      setError("Some files were skipped (unsupported type).");
+    } else {
+      setError("");
+    }
+
+    setPendingAttachments((prev) => [
+      ...prev,
+      ...accepted.map((file) => ({
+        id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+        file,
+        previewUrl: isImageFile(file.name) ? URL.createObjectURL(file) : null,
+      })),
+    ]);
+    inputRef.current?.focus();
+  }
+
+  function removePendingAttachment(id: string) {
+    setPendingAttachments((prev) => {
+      const item = prev.find((a) => a.id === id);
+      if (item) revokeAttachmentPreview(item);
+      return prev.filter((a) => a.id !== id);
+    });
+  }
+
+  function clearPendingAttachments() {
+    setPendingAttachments((prev) => {
+      for (const item of prev) revokeAttachmentPreview(item);
+      return [];
+    });
+  }
+
+  async function submitComposer() {
+    const text = input.trim();
+    const files = pendingAttachments.map((a) => a.file);
+    if (!text && files.length === 0) return;
+    if (loading || sending || uploading) return;
+
+    setInput("");
+    clearPendingAttachments();
+    await sendMessage(text, files);
+  }
+
+  function handleChatUpload(event: ChangeEvent<HTMLInputElement>) {
     const picked = event.target.files;
     const files = picked ? Array.from(picked) : [];
     event.target.value = "";
     if (files.length === 0) return;
-    await uploadFiles(files);
+    addPendingFiles(files);
   }
+
+  const composerBusy = loading || sending || uploading;
+  const canSend = !composerBusy && (input.trim().length > 0 || pendingAttachments.length > 0);
 
   return (
     <div className="flex h-full min-h-0">
@@ -396,42 +484,95 @@ export function VatAssistantChat({
             multiple
             accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.csv,.xlsx,.xls,.zip"
             className="hidden"
-            onChange={(e) => void handleChatUpload(e)}
+            onChange={handleChatUpload}
           />
           <form
-            className="mx-auto flex max-w-2xl items-center gap-2"
+            className="mx-auto max-w-2xl"
             onSubmit={(e) => {
               e.preventDefault();
-              void sendMessage(input);
+              void submitComposer();
             }}
           >
-            <button
-              type="button"
-              disabled={uploading}
-              onClick={() => {
-                setError("");
-                fileInputRef.current?.click();
-              }}
-              className="flex h-9 w-9 shrink-0 items-center justify-center text-zinc-600 transition hover:text-zinc-400 disabled:opacity-40"
-              title="Add files"
+            <div
+              className={`rounded-2xl border bg-zinc-950/80 transition ${
+                composerBusy ? "border-zinc-900 opacity-60" : "border-zinc-800 focus-within:border-zinc-600"
+              }`}
             >
-              +
-            </button>
-            <input
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Message"
-              disabled={loading || sending || uploading}
-              className="h-9 flex-1 border-b border-zinc-800 bg-transparent px-1 text-[14px] text-white outline-none placeholder:text-zinc-700 focus:border-zinc-600 disabled:opacity-40"
-            />
-            <button
-              type="submit"
-              disabled={loading || sending || uploading || !input.trim()}
-              className="text-[13px] text-zinc-500 transition hover:text-white disabled:opacity-30"
-            >
-              Send
-            </button>
+              {pendingAttachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2 border-b border-zinc-900 px-3 py-2.5">
+                  {pendingAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="group relative flex max-w-[160px] items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/80 py-1.5 pl-1.5 pr-7"
+                    >
+                      {attachment.previewUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={attachment.previewUrl}
+                          alt=""
+                          className="h-9 w-9 shrink-0 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-zinc-800 text-[10px] font-medium uppercase text-zinc-500">
+                          {attachment.file.name.split(".").pop()?.slice(0, 4) ?? "file"}
+                        </div>
+                      )}
+                      <span
+                        className="min-w-0 truncate text-[11px] text-zinc-400"
+                        title={attachment.file.name}
+                      >
+                        {shortFileName(attachment.file.name)}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={composerBusy}
+                        onClick={() => removePendingAttachment(attachment.id)}
+                        className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-[13px] text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-40"
+                        aria-label={`Remove ${attachment.file.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="flex items-end gap-1 px-2 py-2">
+                <button
+                  type="button"
+                  disabled={composerBusy}
+                  onClick={() => {
+                    setError("");
+                    fileInputRef.current?.click();
+                  }}
+                  className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center text-zinc-600 transition hover:text-zinc-400 disabled:opacity-40"
+                  title="Add files"
+                >
+                  +
+                </button>
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  rows={1}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void submitComposer();
+                    }
+                  }}
+                  placeholder="Message"
+                  disabled={composerBusy}
+                  className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-1 py-2 text-[14px] leading-relaxed text-white outline-none placeholder:text-zinc-700 disabled:opacity-40"
+                />
+                <button
+                  type="submit"
+                  disabled={!canSend}
+                  className="mb-1 shrink-0 px-2 text-[13px] text-zinc-500 transition hover:text-white disabled:opacity-30"
+                >
+                  Send
+                </button>
+              </div>
+            </div>
           </form>
         </div>
       </div>
