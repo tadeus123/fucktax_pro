@@ -65,8 +65,9 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
       <div className="flex w-full max-w-2xl flex-col gap-4 sm:flex-row sm:gap-6">
         <UploadZone
           title="Documents"
-          hint="invoices · receipts · customs · PDFs"
+          hint="invoices · receipts · customs · folder or files"
           accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.csv,.xlsx,.xls,.doc,.docx,.txt"
+          allowFolder
           files={documents}
           onFilesSelected={handleDocuments}
           active={!docsDone && !uploading}
