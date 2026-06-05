@@ -8,6 +8,8 @@ export type ProcessedDocumentSummary = {
   invoiceNumber: string | null;
   matchedBank: boolean;
   confidence: string;
+  status: "extracted" | "skipped" | "failed";
+  error?: string;
 };
 
 export type ProcessResult = {
@@ -17,4 +19,5 @@ export type ProcessResult = {
   matched: number;
   needsReview: number;
   recentDocuments?: ProcessedDocumentSummary[];
+  failures?: string[];
 };

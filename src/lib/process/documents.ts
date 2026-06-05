@@ -166,7 +166,13 @@ async function extractWithOpenAi(
   options: ExtractDocumentOptions,
 ): Promise<DocumentExtraction> {
   const apiKey = getOpenAiKey();
-  if (!apiKey) return guessFromFilename(filename);
+  if (!apiKey) {
+    return {
+      ...guessFromFilename(filename),
+      warning: "OPENAI_API_KEY missing — cannot extract invoice data.",
+      raw_extraction: { source: "missing_api_key", filename },
+    };
+  }
 
   const isPdf = mimeType === "application/pdf" || filename.toLowerCase().endsWith(".pdf");
   const isImage =

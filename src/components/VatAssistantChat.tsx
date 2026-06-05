@@ -241,6 +241,7 @@ export function VatAssistantChat({
     recentDocuments?: ProcessedDocumentSummary[];
     matched?: number;
     documentsProcessed?: number;
+    failures?: string[];
   }> {
     const response = await fetch("/api/process", {
       method: "POST",
@@ -253,6 +254,7 @@ export function VatAssistantChat({
       recentDocuments?: ProcessedDocumentSummary[];
       matched?: number;
       documentsProcessed?: number;
+      failures?: string[];
     };
     if (!response.ok) {
       throw new Error(data.error ?? "Processing failed");
@@ -262,13 +264,31 @@ export function VatAssistantChat({
 
   function buildUploadAssistantMessage(
     userText: string,
+    fileNames: string[],
     stored: number,
-    processResult: { recentDocuments?: ProcessedDocumentSummary[]; matched?: number },
+    processResult: {
+      recentDocuments?: ProcessedDocumentSummary[];
+      matched?: number;
+      documentsProcessed?: number;
+      failures?: string[];
+    },
   ): string {
+    const docs = processResult.recentDocuments ?? [];
+    const extracted = docs.filter((d) => d.status === "extracted");
+
+    if (extracted.length === 0 && fileNames.length > 0) {
+      const failHint =
+        processResult.failures?.join(" ") ??
+        "Upload succeeded but extraction returned no invoice data.";
+      if (userText.trim()) {
+        return `${userText.trim()}\n\n[Upload issue: ${failHint} Files: ${fileNames.join(", ")}]`;
+      }
+      return `Uploaded ${stored} file(s) but extraction failed: ${failHint}`;
+    }
+
     if (userText.trim()) {
-      const docs = processResult.recentDocuments ?? [];
-      if (docs.length === 0) return userText.trim();
-      const summary = docs
+      if (extracted.length === 0) return userText.trim();
+      const summary = extracted
         .map((d) => {
           const parts = [
             d.counterparty ?? "unknown",
@@ -281,12 +301,11 @@ export function VatAssistantChat({
       return `${userText.trim()}\n\n[Uploaded: ${summary}]`;
     }
 
-    const docs = processResult.recentDocuments ?? [];
-    if (docs.length === 0) {
+    if (extracted.length === 0) {
       return `Uploaded ${stored} file(s). Process and update ELSTER.`;
     }
 
-    const lines = docs.map((d) => {
+    const lines = extracted.map((d) => {
       const amounts = [
         d.grossAmount != null ? `gross €${d.grossAmount.toFixed(2)}` : null,
         d.vatAmount != null ? `VAT €${d.vatAmount.toFixed(2)}` : null,
@@ -294,11 +313,12 @@ export function VatAssistantChat({
         .filter(Boolean)
         .join(", ");
       const bank = d.matchedBank ? "bank matched" : "no bank match yet";
-      return `- ${d.filename}: ${d.counterparty ?? "unknown supplier"}${amounts ? ` (${amounts})` : ""} — ${bank}`;
+      const warn = d.error ? ` — ${d.error}` : "";
+      return `- ${d.filename}: ${d.counterparty ?? "unknown supplier"}${amounts ? ` (${amounts})` : ""} — ${bank}${warn}`;
     });
 
     return [
-      `Uploaded and extracted ${docs.length} document(s):`,
+      `Uploaded and extracted ${extracted.length} document(s):`,
       ...lines,
       "",
       `Auto bank matches: ${processResult.matched ?? 0}. Search pattern "tokenize" (not only full legal name). Set de_supplier_19 and refresh_elster_export.`,
@@ -368,13 +388,23 @@ export function VatAssistantChat({
     const result = await uploadAndProcessFiles(files);
     if (result === null) return;
 
-    const assistantMsg = buildUploadAssistantMessage(trimmed, result.stored, result.processResult);
+    const assistantMsg = buildUploadAssistantMessage(
+      trimmed,
+      fileNames,
+      result.stored,
+      result.processResult,
+    );
     await postUserMessage(assistantMsg, { clearInput: false, skipUserBubble: true });
   }
 
   async function uploadAndProcessFiles(files: File[]): Promise<{
     stored: number;
-    processResult: { recentDocuments?: ProcessedDocumentSummary[]; matched?: number };
+    processResult: {
+      recentDocuments?: ProcessedDocumentSummary[];
+      matched?: number;
+      documentsProcessed?: number;
+      failures?: string[];
+    };
   } | null> {
     if (uploadingRef.current) {
       setError("Upload already in progress — wait for it to finish.");
@@ -401,13 +431,23 @@ export function VatAssistantChat({
 
     try {
       let stored = 0;
-      let processResult: { recentDocuments?: ProcessedDocumentSummary[]; matched?: number } = {};
+      let processResult: {
+        recentDocuments?: ProcessedDocumentSummary[];
+        matched?: number;
+        documentsProcessed?: number;
+        failures?: string[];
+      } = {};
+      const uploadedDocIds: string[] = [];
 
       if (docFiles.length > 0) {
         const r = await uploadFilingFiles(filingPeriodId, "document", docFiles, ({ completed, total }) => {
           setActivity(`Uploading ${completed}/${total}…`);
         });
         stored += r.stored;
+        uploadedDocIds.push(...r.uploaded.map((u) => u.id));
+        if (r.stored > 0 && uploadedDocIds.length === 0) {
+          throw new Error("Upload succeeded but server did not return file IDs — refresh and try again.");
+        }
       }
       if (bankFiles.length > 0) {
         const r = await uploadFilingFiles(filingPeriodId, "bank", bankFiles);
@@ -420,7 +460,11 @@ export function VatAssistantChat({
 
       if (docFiles.length > 0) {
         setActivity("Extracting invoice data…");
-        processResult = await runProcess({ filingPeriodId, incremental: true });
+        processResult = await runProcess({
+          filingPeriodId,
+          incremental: true,
+          fileIds: uploadedDocIds,
+        });
       }
       if (bankFiles.length > 0) {
         setActivity("Importing bank CSV…");

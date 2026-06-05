@@ -13,7 +13,84 @@ type UploadedFileRow = {
   original_filename: string;
   mime_type: string | null;
   created_at: string;
+  processing_status?: string;
 };
+
+function assertOpenAiConfigured(): void {
+  if (!process.env.OPENAI_API_KEY?.trim()) {
+    throw new Error(
+      "OPENAI_API_KEY is not configured — invoice extraction cannot run. Add it in Vercel env settings.",
+    );
+  }
+}
+
+async function supersedeDuplicateFilenameRecords(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  filingPeriodId: string,
+  sessionId: string,
+  batch: UploadedFileRow[],
+): Promise<void> {
+  for (const file of batch) {
+    const { data: older } = await supabase
+      .from("uploaded_files")
+      .select("id")
+      .eq("session_id", sessionId)
+      .eq("original_filename", file.original_filename)
+      .neq("id", file.id);
+
+    const oldIds = (older ?? []).map((row) => row.id);
+    if (oldIds.length === 0) continue;
+
+    await supabase
+      .from("document_records")
+      .delete()
+      .eq("filing_period_id", filingPeriodId)
+      .in("file_id", oldIds);
+  }
+}
+
+async function resolveDocumentFilesToProcess(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  sessionId: string,
+  filingPeriodId: string,
+  fileIds?: string[],
+): Promise<UploadedFileRow[]> {
+  const { data: files } = await supabase
+    .from("uploaded_files")
+    .select(
+      "id, kind, storage_bucket, storage_path, original_filename, mime_type, created_at, processing_status",
+    )
+    .eq("session_id", sessionId)
+    .eq("kind", "document")
+    .order("created_at", { ascending: false });
+
+  const allFiles = (files ?? []) as UploadedFileRow[];
+
+  if (fileIds?.length) {
+    const idSet = new Set(fileIds);
+    const batch = allFiles.filter((file) => idSet.has(file.id));
+    if (batch.length === 0) {
+      throw new Error("Uploaded files not found in session — try uploading again.");
+    }
+    return batch;
+  }
+
+  const { data: existingRecords } = await supabase
+    .from("document_records")
+    .select("file_id")
+    .eq("filing_period_id", filingPeriodId);
+
+  const processedFileIds = new Set((existingRecords ?? []).map((row) => row.file_id));
+
+  return dedupeFilesByName(
+    allFiles.filter(
+      (file) =>
+        file.processing_status === "pending" ||
+        file.processing_status === "failed" ||
+        !processedFileIds.has(file.id),
+    ),
+  );
+}
 
 function daysBetween(a: string, b: string): number {
   const da = new Date(a);
@@ -123,46 +200,6 @@ function scoreDocumentBankMatch(
   return score;
 }
 
-async function summarizeProcessedDocuments(
-  supabase: ReturnType<typeof createSupabaseAdmin>,
-  filingPeriodId: string,
-  sessionId: string,
-  fileIds: string[],
-): Promise<ProcessedDocumentSummary[]> {
-  if (fileIds.length === 0) return [];
-
-  const [{ data: records }, { data: files }, { data: matchedTx }] = await Promise.all([
-    supabase
-      .from("document_records")
-      .select(
-        "id, file_id, counterparty_name, gross_amount, vat_amount, invoice_number, confidence",
-      )
-      .eq("filing_period_id", filingPeriodId)
-      .in("file_id", fileIds),
-    supabase.from("uploaded_files").select("id, original_filename").in("id", fileIds),
-    supabase
-      .from("bank_transactions")
-      .select("matched_document_id")
-      .eq("session_id", sessionId)
-      .not("matched_document_id", "is", null),
-  ]);
-
-  const filenameById = new Map((files ?? []).map((f) => [f.id, f.original_filename] as const));
-  const matchedDocIds = new Set(
-    (matchedTx ?? []).map((row) => row.matched_document_id).filter(Boolean),
-  );
-
-  return (records ?? []).map((row) => ({
-    filename: filenameById.get(row.file_id) ?? "unknown",
-    counterparty: row.counterparty_name,
-    grossAmount: row.gross_amount != null ? Number(row.gross_amount) : null,
-    vatAmount: row.vat_amount != null ? Number(row.vat_amount) : null,
-    invoiceNumber: row.invoice_number,
-    matchedBank: matchedDocIds.has(row.id),
-    confidence: row.confidence ?? "review",
-  }));
-}
-
 function filterBankRowsToPeriod(
   rows: ParsedBankRow[],
   periodStart: string,
@@ -239,18 +276,41 @@ async function processDocumentFiles(
   documentFiles: UploadedFileRow[],
   periodStart: string,
   periodEnd: string,
-): Promise<{ processed: number; needsReview: number; skipped: number }> {
+): Promise<{
+  processed: number;
+  needsReview: number;
+  skipped: number;
+  outcomes: ProcessedDocumentSummary[];
+  failures: string[];
+}> {
   let processed = 0;
   let needsReview = 0;
   let skipped = 0;
+  const outcomes: ProcessedDocumentSummary[] = [];
+  const failures: string[] = [];
 
   for (const file of documentFiles) {
+    const baseOutcome = {
+      filename: file.original_filename,
+      counterparty: null as string | null,
+      grossAmount: null as number | null,
+      vatAmount: null as number | null,
+      invoiceNumber: null as string | null,
+      matchedBank: false,
+      confidence: "review",
+    };
+
     if (shouldSkipDocumentFile(file.original_filename)) {
       skipped += 1;
       await supabase
         .from("uploaded_files")
-        .update({ processing_status: "done", error_message: null })
+        .update({ processing_status: "done", error_message: "Skipped non-document type" })
         .eq("id", file.id);
+      outcomes.push({
+        ...baseOutcome,
+        status: "skipped",
+        error: "Not an invoice PDF/image — skipped.",
+      });
       continue;
     }
 
@@ -279,37 +339,49 @@ async function processDocumentFiles(
         skipped += 1;
         await supabase
           .from("uploaded_files")
-          .update({ processing_status: "done" })
+          .update({ processing_status: "done", error_message: extraction.warning })
           .eq("id", file.id);
+        outcomes.push({
+          ...baseOutcome,
+          counterparty: extraction.counterparty_name,
+          status: "skipped",
+          error: extraction.warning ?? "Document skipped (not a deductible invoice).",
+        });
         continue;
       }
 
-      const { error: insertError } = await supabase.from("document_records").insert({
-        file_id: file.id,
-        filing_period_id: filingPeriodId,
-        document_type: extraction.document_type,
-        counterparty_name: extraction.counterparty_name,
-        invoice_number: extraction.invoice_number,
-        invoice_date: extraction.invoice_date,
-        leistungsdatum: extraction.leistungsdatum,
-        net_amount: extraction.net_amount,
-        vat_rate: extraction.vat_rate,
-        vat_amount: extraction.vat_amount,
-        gross_amount: extraction.gross_amount,
-        currency: extraction.currency,
-        country: extraction.country,
-        vat_id: extraction.vat_id,
-        reverse_charge_text: extraction.reverse_charge_text,
-        counterparty_type: extraction.counterparty_type,
-        vat_shown: extraction.vat_shown,
-        vat_treatment: extraction.vat_treatment,
-        confidence: extraction.confidence,
-        warning: extraction.warning,
-        risk_status: extraction.vat_case,
-        raw_extraction: extraction.raw_extraction,
-      });
+      const { data: inserted, error: insertError } = await supabase
+        .from("document_records")
+        .insert({
+          file_id: file.id,
+          filing_period_id: filingPeriodId,
+          document_type: extraction.document_type,
+          counterparty_name: extraction.counterparty_name,
+          invoice_number: extraction.invoice_number,
+          invoice_date: extraction.invoice_date,
+          leistungsdatum: extraction.leistungsdatum,
+          net_amount: extraction.net_amount,
+          vat_rate: extraction.vat_rate,
+          vat_amount: extraction.vat_amount,
+          gross_amount: extraction.gross_amount,
+          currency: extraction.currency,
+          country: extraction.country,
+          vat_id: extraction.vat_id,
+          reverse_charge_text: extraction.reverse_charge_text,
+          counterparty_type: extraction.counterparty_type,
+          vat_shown: extraction.vat_shown,
+          vat_treatment: extraction.vat_treatment,
+          confidence: extraction.confidence,
+          warning: extraction.warning,
+          risk_status: extraction.vat_case,
+          raw_extraction: extraction.raw_extraction,
+        })
+        .select("id")
+        .single();
 
-      if (insertError) throw new Error(insertError.message);
+      if (insertError || !inserted) {
+        throw new Error(insertError?.message ?? "Could not save document record");
+      }
 
       const status =
         extraction.confidence === "review" ||
@@ -322,17 +394,35 @@ async function processDocumentFiles(
 
       processed += 1;
       if (status === "needs_review") needsReview += 1;
+
+      outcomes.push({
+        filename: file.original_filename,
+        counterparty: extraction.counterparty_name,
+        grossAmount: extraction.gross_amount,
+        vatAmount: extraction.vat_amount,
+        invoiceNumber: extraction.invoice_number,
+        matchedBank: false,
+        confidence: extraction.confidence,
+        status: "extracted",
+        error: extraction.warning ?? undefined,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Processing failed";
+      failures.push(`${file.original_filename}: ${message}`);
       await supabase
         .from("uploaded_files")
         .update({ processing_status: "failed", error_message: message })
         .eq("id", file.id);
       needsReview += 1;
+      outcomes.push({
+        ...baseOutcome,
+        status: "failed",
+        error: message,
+      });
     }
   }
 
-  return { processed, needsReview, skipped };
+  return { processed, needsReview, skipped, outcomes, failures };
 }
 
 async function reconcileSession(
@@ -463,6 +553,7 @@ export async function runFilingProcess(filingPeriodId: string): Promise<ProcessR
     filing.period_start,
     filing.period_end,
   );
+  assertOpenAiConfigured();
   const { processed: documentsProcessed, needsReview, skipped } = await processDocumentFiles(
     supabase,
     filingPeriodId,
@@ -501,9 +592,56 @@ export async function runFilingProcess(filingPeriodId: string): Promise<ProcessR
   };
 }
 
+function applyBankMatchFlags(
+  outcomes: ProcessedDocumentSummary[],
+  matchedByFilename: Map<string, boolean>,
+): ProcessedDocumentSummary[] {
+  return outcomes.map((outcome) => ({
+    ...outcome,
+    matchedBank: matchedByFilename.get(outcome.filename.toLowerCase()) ?? outcome.matchedBank,
+  }));
+}
+
+async function bankMatchFlagsForFiles(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  sessionId: string,
+  fileIds: string[],
+): Promise<Map<string, boolean>> {
+  const flags = new Map<string, boolean>();
+  if (fileIds.length === 0) return flags;
+
+  const [{ data: records }, { data: files }, { data: matchedTx }] = await Promise.all([
+    supabase
+      .from("document_records")
+      .select("id, file_id")
+      .in("file_id", fileIds),
+    supabase.from("uploaded_files").select("id, original_filename").in("id", fileIds),
+    supabase
+      .from("bank_transactions")
+      .select("matched_document_id")
+      .eq("session_id", sessionId)
+      .not("matched_document_id", "is", null),
+  ]);
+
+  const filenameById = new Map((files ?? []).map((f) => [f.id, f.original_filename] as const));
+  const matchedDocIds = new Set(
+    (matchedTx ?? []).map((row) => row.matched_document_id).filter(Boolean),
+  );
+
+  for (const row of records ?? []) {
+    const name = filenameById.get(row.file_id);
+    if (name) {
+      flags.set(name.toLowerCase(), matchedDocIds.has(row.id));
+    }
+  }
+
+  return flags;
+}
+
 /** Process only newly uploaded documents (e.g. from chat). Does not wipe existing records. */
 export async function runIncrementalDocumentProcess(
   filingPeriodId: string,
+  fileIds?: string[],
 ): Promise<ProcessResult> {
   const supabase = createSupabaseAdmin();
 
@@ -527,22 +665,14 @@ export async function runIncrementalDocumentProcess(
 
   if (!session) throw new Error("No upload session.");
 
-  const [{ data: files }, { data: existingRecords }] = await Promise.all([
-    supabase
-      .from("uploaded_files")
-      .select("id, kind, storage_bucket, storage_path, original_filename, mime_type, created_at")
-      .eq("session_id", session.id)
-      .eq("kind", "document")
-      .order("created_at", { ascending: false }),
-    supabase.from("document_records").select("file_id").eq("filing_period_id", filingPeriodId),
-  ]);
-
-  const processedFileIds = new Set((existingRecords ?? []).map((r) => r.file_id));
-  const newFiles = dedupeFilesByName(
-    (files ?? []).filter((f) => !processedFileIds.has(f.id)) as UploadedFileRow[],
+  const filesToProcess = await resolveDocumentFilesToProcess(
+    supabase,
+    session.id,
+    filingPeriodId,
+    fileIds,
   );
 
-  if (newFiles.length === 0) {
+  if (filesToProcess.length === 0) {
     const matched = await reconcileSession(supabase, session.id, filingPeriodId);
     return {
       sessionId: session.id,
@@ -551,23 +681,44 @@ export async function runIncrementalDocumentProcess(
       matched,
       needsReview: 0,
       recentDocuments: [],
+      failures: fileIds?.length
+        ? ["Files were uploaded but nothing was queued for extraction — try again."]
+        : [],
     };
   }
 
-  const { processed: documentsProcessed, needsReview, skipped } = await processDocumentFiles(
+  assertOpenAiConfigured();
+  await supersedeDuplicateFilenameRecords(supabase, filingPeriodId, session.id, filesToProcess);
+
+  const {
+    processed: documentsProcessed,
+    needsReview,
+    skipped,
+    outcomes,
+    failures,
+  } = await processDocumentFiles(
     supabase,
     filingPeriodId,
-    newFiles,
+    filesToProcess,
     filing.period_start,
     filing.period_end,
   );
+
   const matched = await reconcileSession(supabase, session.id, filingPeriodId);
-  const recentDocuments = await summarizeProcessedDocuments(
+  const matchFlags = await bankMatchFlagsForFiles(
     supabase,
-    filingPeriodId,
     session.id,
-    newFiles.map((f) => f.id),
+    filesToProcess.map((f) => f.id),
   );
+  const recentDocuments = applyBankMatchFlags(outcomes, matchFlags);
+
+  if (documentsProcessed === 0 && failures.length === 0 && skipped === filesToProcess.length) {
+    failures.push("All uploaded files were skipped — check file types (PDF/images only).");
+  }
+
+  if (documentsProcessed === 0 && failures.length > 0) {
+    throw new Error(failures.join(" "));
+  }
 
   try {
     const { buildElsterExport } = await import("@/lib/vat/export-elster");
@@ -576,6 +727,17 @@ export async function runIncrementalDocumentProcess(
     // optional
   }
 
+  await logAppEvent("info", "process", "Incremental document process finished", {
+    filingPeriodId,
+    sessionId: session.id,
+    documentsProcessed,
+    matched,
+    needsReview,
+    skipped,
+    failureCount: failures.length,
+    fileIds: filesToProcess.map((f) => f.id),
+  });
+
   return {
     sessionId: session.id,
     documentsProcessed,
@@ -583,6 +745,7 @@ export async function runIncrementalDocumentProcess(
     matched,
     needsReview,
     recentDocuments,
+    failures,
   };
 }
 

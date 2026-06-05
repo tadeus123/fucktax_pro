@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
       filingPeriodId?: string;
       incremental?: boolean;
       bank?: boolean;
+      fileIds?: string[];
     };
     const filingPeriodId = body.filingPeriodId?.trim();
 
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
     if (body.bank) {
       result = await runIncrementalBankReimport(filingPeriodId);
     } else if (body.incremental) {
-      result = await runIncrementalDocumentProcess(filingPeriodId);
+      result = await runIncrementalDocumentProcess(filingPeriodId, body.fileIds);
     } else {
       result = await runFilingProcess(filingPeriodId);
     }
