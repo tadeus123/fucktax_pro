@@ -1,7 +1,10 @@
 export function toolStatusLabel(name: string, args: Record<string, unknown>): string {
   const pattern = args.pattern ? String(args.pattern) : "";
+  const query = args.query ? String(args.query) : "";
 
   switch (name) {
+    case "search_web":
+      return query ? `Searching web for “${query}”…` : "Searching web…";
     case "search_filing_data":
       return pattern ? `Searching bank for “${pattern}”…` : "Searching bank & documents…";
     case "get_recovery_opportunities":

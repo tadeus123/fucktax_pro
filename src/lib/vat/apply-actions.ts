@@ -1,5 +1,6 @@
 import type { VatCaseId } from "@/lib/vat/cases";
 import { classifyUnmatchedBankLine } from "@/lib/vat/classify-bank";
+import { searchWeb } from "@/lib/web-search";
 import { searchFilingData } from "@/lib/vat/build-filing-context";
 import { getRecoveryOpportunities } from "@/lib/vat/bank-triage";
 import { buildElsterExport } from "@/lib/vat/export-elster";
@@ -329,6 +330,15 @@ export async function executeAssistantTool(
         String(args.pattern ?? ""),
         String(args.note ?? "Excluded in chat"),
       );
+    case "search_web": {
+      const result = await searchWeb(String(args.query ?? ""));
+      return {
+        ok: result.ok,
+        message: result.message,
+        query: result.query,
+        results: result.results,
+      };
+    }
     case "get_recovery_opportunities":
       return (await getRecoveryOpportunities(filingPeriodId)) as ApplyResult & Record<string, unknown>;
     case "search_filing_data":

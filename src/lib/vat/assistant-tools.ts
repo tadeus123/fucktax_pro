@@ -96,6 +96,24 @@ export const ASSISTANT_TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "search_web",
+      description:
+        "Search the internet for company/vendor info, VAT treatment, what a counterparty does. Use when user says search online or vendor on bank line is unknown (e.g. PNL Fintech B.V.).",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Search query, e.g. PNL Fintech B.V. company VAT Germany",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "get_recovery_opportunities",
       description:
         "Get bank-first triage: which unmatched payments to ask user about (invoice upload) vs auto-file from bank (reverse charge, exclude). Use on first message or when user asks what is missing.",

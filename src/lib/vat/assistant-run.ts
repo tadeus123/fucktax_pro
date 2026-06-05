@@ -34,6 +34,14 @@ function trimToolResultForModel(name: string, result: Record<string, unknown>): 
   if (name === "search_filing_data") {
     return JSON.stringify(result);
   }
+  if (name === "search_web") {
+    return JSON.stringify({
+      ok: result.ok,
+      message: result.message,
+      query: result.query,
+      results: result.results,
+    });
+  }
   if (name === "get_recovery_opportunities") {
     return JSON.stringify({
       ok: result.ok,
