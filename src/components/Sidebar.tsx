@@ -4,11 +4,17 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   formatShortDeadline,
-  isDeadlineUrgent,
+  getDeadlineTone,
   JAHRESABSCHLUSS,
   STEUERERKLAERUNG,
   VAT_FILINGS,
 } from "@/lib/filings";
+
+const deadlineToneClass = {
+  overdue: "text-red-500",
+  soon: "text-yellow-500",
+  normal: "text-zinc-600",
+} as const;
 
 function NavLink({
   href,
@@ -21,7 +27,7 @@ function NavLink({
   deadline: string;
   active: boolean;
 }) {
-  const urgent = isDeadlineUrgent(deadline);
+  const tone = getDeadlineTone(deadline);
   const due = formatShortDeadline(deadline);
 
   return (
@@ -34,7 +40,7 @@ function NavLink({
       <span>{label}</span>
       <span
         className={`shrink-0 text-[10px] tabular-nums ${
-          urgent ? "text-red-500" : active ? "text-white/45" : "text-zinc-600"
+          tone === "normal" && active ? "text-white/45" : deadlineToneClass[tone]
         }`}
       >
         {due}

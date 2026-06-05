@@ -97,15 +97,22 @@ export function formatShortDeadline(deadline: string): string {
   return shortDeadlineFmt.format(new Date(deadline));
 }
 
-/** Red when overdue or within 21 days. */
-export function isDeadlineUrgent(deadline: string, now = new Date()): boolean {
+export function daysUntilDeadline(deadline: string, now = new Date()): number {
   const due = new Date(deadline);
   due.setHours(23, 59, 59, 999);
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  const msPerDay = 86400000;
-  const daysLeft = Math.ceil((due.getTime() - today.getTime()) / msPerDay);
-  return daysLeft <= 21;
+  return Math.ceil((due.getTime() - today.getTime()) / 86400000);
+}
+
+export type DeadlineTone = "overdue" | "soon" | "normal";
+
+/** Red = overdue. Yellow = less than 30 days away. White = 30+ days. */
+export function getDeadlineTone(deadline: string, now = new Date()): DeadlineTone {
+  const daysLeft = daysUntilDeadline(deadline, now);
+  if (daysLeft < 0) return "overdue";
+  if (daysLeft < 30) return "soon";
+  return "normal";
 }
 
 export const DOCUMENT_UPLOAD_HINTS = [
