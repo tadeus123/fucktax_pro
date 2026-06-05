@@ -25,4 +25,7 @@ export type ProcessResult = {
   elsterApplied?: number;
   includedDocuments?: number;
   excludedDocuments?: number;
+  exportReady?: boolean;
+  repaired?: number;
+  bankFilled?: number;
 };

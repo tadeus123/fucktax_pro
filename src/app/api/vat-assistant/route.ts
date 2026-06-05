@@ -11,7 +11,7 @@ import {
   mentionsElsterTopic,
 } from "@/lib/vat/elster-export-status";
 import {
-  formatElsterReprocessReply,
+  formatElsterReprocessReplyWithStatus,
   reprocessFilingElster,
   shouldRunBackendElsterRefresh,
 } from "@/lib/vat/reprocess-elster";
@@ -199,8 +199,14 @@ export async function POST(request: NextRequest) {
           content: message,
         });
 
-        const result = await reprocessFilingElster(filingPeriodId, reconcileSession);
-        const reply = formatElsterReprocessReply(result);
+        const result = await reprocessFilingElster(filingPeriodId, reconcileSession, {
+          userMessage: message,
+        });
+        const reply = await formatElsterReprocessReplyWithStatus(
+          result,
+          filingPeriodId,
+          message,
+        );
 
         await saveReviewMessage(filingPeriodId, "assistant", reply);
         await logChatEvent({

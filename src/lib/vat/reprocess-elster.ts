@@ -1,20 +1,28 @@
 import type { ProcessedDocumentSummary } from "@/lib/process/types";
+import { getElsterExportStatus, formatElsterBlockersForChat } from "@/lib/vat/elster-export-status";
 import { autoApplyUploadedDocumentsToElster } from "@/lib/vat/auto-file-documents";
 import { buildElsterExport } from "@/lib/vat/export-elster";
+import {
+  pickDocumentsForReply,
+  repairBrokenSupplierRecords,
+  tokenizeFileIdsInSession,
+} from "@/lib/vat/repair-supplier-records";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 
 export type ElsterReprocessResult = {
   elsterApplied: number;
   inputVatAdded: number;
   matched: number;
+  repaired: number;
+  bankFilled: number;
   vatPayable: number | null;
   inputVatDeductible: number | null;
   includedDocuments: number | null;
   excludedDocuments: number | null;
+  exportReady: boolean;
   recentDocuments: ProcessedDocumentSummary[];
 };
 
-/** Reconcile type imported lazily to keep module graph simple. */
 type ReconcileFn = (
   supabase: ReturnType<typeof createSupabaseAdmin>,
   sessionId: string,
@@ -66,21 +74,32 @@ async function loadDocumentSummaries(
   });
 }
 
-export function formatElsterReprocessReply(result: ElsterReprocessResult): string {
-  const docs = result.recentDocuments.filter((d) => d.status === "extracted");
+function formatDocLine(d: ProcessedDocumentSummary): string {
+  const amounts = [
+    d.grossAmount != null ? `gross €${d.grossAmount.toFixed(2)}` : null,
+    d.vatAmount != null ? `VAT €${d.vatAmount.toFixed(2)}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const bank = d.matchedBank ? "bank matched" : "not bank-matched";
+  const missing = !amounts ? " — **missing amounts, re-upload PDF**" : "";
+  return `${d.filename}: ${d.counterparty ?? "unknown"}${amounts ? ` (${amounts})` : ""} — ${bank}${missing}`;
+}
+
+export function formatElsterReprocessReply(
+  result: ElsterReprocessResult,
+  userMessage?: string,
+): string {
+  const docs = pickDocumentsForReply(
+    result.recentDocuments.filter((d) => d.status === "extracted"),
+    userMessage,
+    12,
+  );
+
   const lines =
     docs.length > 0
-      ? docs.map((d) => {
-          const amounts = [
-            d.grossAmount != null ? `gross €${d.grossAmount.toFixed(2)}` : null,
-            d.vatAmount != null ? `VAT €${d.vatAmount.toFixed(2)}` : null,
-          ]
-            .filter(Boolean)
-            .join(", ");
-          const bank = d.matchedBank ? "bank matched" : "not bank-matched";
-          return `${d.filename}: ${d.counterparty ?? "unknown"}${amounts ? ` (${amounts})` : ""} — ${bank}`;
-        })
-      : ["No supplier invoices in backend yet — upload PDFs with + then Send."];
+      ? docs.map(formatDocLine)
+      : ["No matching invoices in backend — upload PDFs with + then Send."];
 
   const stats: string[] = [];
   if (result.vatPayable != null) {
@@ -98,35 +117,64 @@ export function formatElsterReprocessReply(result: ElsterReprocessResult): strin
     stats.push(`Excluded from rollup: ${result.excludedDocuments}.`);
   }
 
-  return [
-    "ELSTER rebuilt from backend (no AI guesswork):",
+  const body = [
+    "Backend update (deterministic — not AI):",
     ...lines,
     "",
     ...stats,
+    result.repaired > 0
+      ? `Repaired ${result.repaired} record(s)${result.bankFilled > 0 ? ` (${result.bankFilled} amount(s) from bank lines)` : ""}.`
+      : "",
     result.elsterApplied > 0
-      ? `${result.elsterApplied} invoice(s) filed as de_supplier in ELSTER.`
-      : "No new invoices auto-filed — check extraction amounts on uploaded PDFs.",
-    `Bank matches this run: ${result.matched}. Download ELSTER XML to verify Kz66/Kz98.`,
+      ? `${result.elsterApplied} invoice(s) filed as de_supplier_19 in ELSTER.`
+      : "",
+    `Bank matches this run: ${result.matched}.`,
+    result.exportReady
+      ? "ELSTER XML ready — use Download ELSTER XML above."
+      : "ELSTER XML not ready yet — see blockers below.",
   ]
     .filter(Boolean)
     .join("\n");
+
+  return body;
+}
+
+export async function formatElsterReprocessReplyWithStatus(
+  result: ElsterReprocessResult,
+  filingPeriodId: string,
+  userMessage?: string,
+): Promise<string> {
+  let reply = formatElsterReprocessReply(result, userMessage);
+  if (!result.exportReady) {
+    const status = await getElsterExportStatus(filingPeriodId);
+    reply += formatElsterBlockersForChat(status);
+  }
+  return reply;
 }
 
 export function shouldRunBackendElsterRefresh(message: string): boolean {
-  const text = message.trim();
+  const text = message.trim().toLowerCase();
   if (!text) return false;
-  return (
-    /\belster\b|\bxml\b|voranmeldung|ustva|mein elster/i.test(text) ||
-    /\bcalculate\b.*\bvat\b|\bnew vat\b|\brecalculate\b|\bupdate.*xml\b|\bvorsteuer\b|\brollup\b/i.test(
-      text,
-    )
-  );
+
+  if (/\belster\b|\bxml\b|voranmeldung|ustva|mein elster/i.test(text)) return true;
+  if (/\bcalculate\b.*\bvat\b|\bnew vat\b|\brecalculate\b|\bupdate.*xml\b|\bvorsteuer\b|\brollup\b/i.test(text)) {
+    return true;
+  }
+  if (/tokenize|to25\d|include.*tokenize|here is the tokenize|these are the tokenize/i.test(text)) {
+    return true;
+  }
+  if (/match them|check again|should also change|vat payable should|process and update elster/i.test(text)) {
+    return true;
+  }
+  if (/^wrong$|not bank-matched|not bank matched/i.test(text)) return true;
+
+  return false;
 }
 
-/** Auto-file supplier invoices, reconcile bank, rebuild ELSTER rollup. */
 export async function reprocessFilingElster(
   filingPeriodId: string,
   reconcileSession: ReconcileFn,
+  options?: { userMessage?: string; focusFileIds?: string[] },
 ): Promise<ElsterReprocessResult> {
   const supabase = createSupabaseAdmin();
 
@@ -143,13 +191,29 @@ export async function reprocessFilingElster(
       elsterApplied: 0,
       inputVatAdded: 0,
       matched: 0,
+      repaired: 0,
+      bankFilled: 0,
       vatPayable: null,
       inputVatDeductible: null,
       includedDocuments: null,
       excludedDocuments: null,
+      exportReady: false,
       recentDocuments: [],
     };
   }
+
+  const tokenizeIds = await tokenizeFileIdsInSession(session.id);
+  const repairIds = options?.focusFileIds?.length
+    ? [...new Set([...options.focusFileIds, ...tokenizeIds])]
+    : tokenizeIds.length > 0
+      ? tokenizeIds
+      : undefined;
+
+  const { repaired, bankFilled } = await repairBrokenSupplierRecords(
+    filingPeriodId,
+    session.id,
+    repairIds,
+  );
 
   const { data: files } = await supabase
     .from("uploaded_files")
@@ -157,24 +221,35 @@ export async function reprocessFilingElster(
     .eq("session_id", session.id)
     .eq("kind", "document");
 
-  const fileIds = (files ?? []).map((f) => f.id);
+  const allFileIds = (files ?? []).map((f) => f.id);
+  const applyIds =
+    tokenizeIds.length > 0 ? [...new Set([...tokenizeIds, ...(options?.focusFileIds ?? [])])] : allFileIds;
 
-  const { applied: elsterApplied, inputVatAdded } = await autoApplyUploadedDocumentsToElster(
+  const { applied: elsterApplied } = await autoApplyUploadedDocumentsToElster(
     filingPeriodId,
-    fileIds,
+    applyIds,
   );
   const matched = await reconcileSession(supabase, session.id, filingPeriodId);
+
+  const displayIds =
+    (options?.focusFileIds?.length ?? 0) > 0
+      ? [...new Set([...(options?.focusFileIds ?? []), ...tokenizeIds])]
+      : tokenizeIds.length > 0
+        ? tokenizeIds
+        : applyIds.slice(0, 20);
+
   const recentDocuments = await loadDocumentSummaries(
     supabase,
     filingPeriodId,
     session.id,
-    fileIds,
+    displayIds.length > 0 ? displayIds : applyIds.slice(0, 20),
   );
 
   let vatPayable: number | null = null;
   let inputVatDeductible: number | null = null;
   let includedDocuments: number | null = null;
   let excludedDocuments: number | null = null;
+  let exportReady = false;
 
   const refreshed = await buildElsterExport(filingPeriodId);
   if (refreshed) {
@@ -182,16 +257,75 @@ export async function reprocessFilingElster(
     inputVatDeductible = refreshed.rollup.inputVatDeductible;
     includedDocuments = refreshed.rollup.includedDocuments;
     excludedDocuments = refreshed.rollup.excludedDocuments;
+    exportReady = refreshed.exportReady;
   }
 
   return {
     elsterApplied,
-    inputVatAdded,
+    inputVatAdded: 0,
     matched,
+    repaired,
+    bankFilled,
     vatPayable,
     inputVatDeductible,
     includedDocuments,
     excludedDocuments,
+    exportReady,
     recentDocuments,
   };
+}
+
+export function formatUploadProcessReply(
+  processResult: {
+    recentDocuments?: ProcessedDocumentSummary[];
+    matched?: number;
+    vatPayable?: number;
+    inputVatDeductible?: number;
+    elsterApplied?: number;
+    includedDocuments?: number;
+    excludedDocuments?: number;
+    exportReady?: boolean;
+    repaired?: number;
+    bankFilled?: number;
+  },
+  fileNames: string[],
+): string {
+  const extracted = (processResult.recentDocuments ?? []).filter((d) => d.status === "extracted");
+  const lines = extracted.length > 0 ? extracted.map(formatDocLine) : fileNames.map((f) => `${f}: processing failed or skipped`);
+
+  const stats: string[] = [];
+  if (processResult.vatPayable != null) {
+    const inputVat = processResult.inputVatDeductible ?? 0;
+    const payable = processResult.vatPayable;
+    stats.push(
+      payable <= 0 && inputVat > 0
+        ? `VAT payable €${payable.toFixed(2)} (Vorsteuer €${inputVat.toFixed(2)} deducted).`
+        : `VAT payable €${payable.toFixed(2)} (input Vorsteuer €${inputVat.toFixed(2)}).`,
+    );
+  }
+  if (processResult.includedDocuments != null) {
+    stats.push(`Included in ELSTER rollup: ${processResult.includedDocuments}.`);
+  }
+  if (processResult.excludedDocuments != null) {
+    stats.push(`Excluded from rollup: ${processResult.excludedDocuments}.`);
+  }
+
+  return [
+    `Uploaded and processed ${fileNames.length} file(s):`,
+    ...lines,
+    "",
+    ...stats,
+    processResult.repaired
+      ? `Repaired ${processResult.repaired} record(s)${processResult.bankFilled ? ` (${processResult.bankFilled} from bank)` : ""}.`
+      : "",
+    processResult.elsterApplied
+      ? `${processResult.elsterApplied} invoice(s) filed as de_supplier_19.`
+      : "",
+    `Bank matches: ${processResult.matched ?? 0}.`,
+    processResult.exportReady === false
+      ? "ELSTER XML not ready — more documents need review before import."
+      : "Download ELSTER XML to verify Kz66/Kz98.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

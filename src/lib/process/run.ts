@@ -5,6 +5,7 @@ import type { ProcessedDocumentSummary, ProcessResult } from "@/lib/process/type
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { inferSupplierFromFilename, matchesVendorPattern } from "@/lib/vat/vendor-match";
 import { autoApplyUploadedDocumentsToElster } from "@/lib/vat/auto-file-documents";
+import { repairBrokenSupplierRecords } from "@/lib/vat/repair-supplier-records";
 
 type UploadedFileRow = {
   id: string;
@@ -224,6 +225,9 @@ function scoreDocumentBankMatch(
   }
   if (matchesVendorPattern(docText, "tokenize") && matchesVendorPattern(txText, "tokenize")) {
     score += 5;
+  }
+  if (matchesVendorPattern(filename, "tokenize") && matchesVendorPattern(txText, "tokenize")) {
+    score += 6;
   }
 
   const docDate = doc.payment_date ?? doc.invoice_date;
@@ -775,6 +779,20 @@ export async function runIncrementalDocumentProcess(
   }
 
   assertOpenAiConfigured();
+
+  if (fileIds?.length) {
+    const ids = filesToProcess.map((f) => f.id);
+    await supabase
+      .from("document_records")
+      .delete()
+      .eq("filing_period_id", filingPeriodId)
+      .in("file_id", ids);
+    await supabase
+      .from("uploaded_files")
+      .update({ processing_status: "pending", error_message: null })
+      .in("id", ids);
+  }
+
   await supersedeDuplicateFilenameRecords(supabase, filingPeriodId, session.id, filesToProcess);
 
   const {
@@ -791,16 +809,20 @@ export async function runIncrementalDocumentProcess(
     filing.period_end,
   );
 
+  const batchFileIds = filesToProcess.map((f) => f.id);
+
+  const { repaired, bankFilled } = await repairBrokenSupplierRecords(
+    filingPeriodId,
+    session.id,
+    batchFileIds,
+  );
+
   const { applied: elsterApplied } = await autoApplyUploadedDocumentsToElster(
     filingPeriodId,
-    filesToProcess.map((f) => f.id),
+    batchFileIds,
   );
   const matched = await reconcileSession(supabase, session.id, filingPeriodId);
-  const matchFlags = await bankMatchFlagsForFiles(
-    supabase,
-    session.id,
-    filesToProcess.map((f) => f.id),
-  );
+  const matchFlags = await bankMatchFlagsForFiles(supabase, session.id, batchFileIds);
   let recentDocuments = applyBankMatchFlags(outcomes, matchFlags);
   recentDocuments = await refreshOutcomesFromRecords(
     supabase,
@@ -822,6 +844,7 @@ export async function runIncrementalDocumentProcess(
   let inputVatDeductible: number | undefined;
   let includedDocuments: number | undefined;
   let excludedDocuments: number | undefined;
+  let exportReady: boolean | undefined;
 
   try {
     const { buildElsterExport } = await import("@/lib/vat/export-elster");
@@ -831,6 +854,7 @@ export async function runIncrementalDocumentProcess(
       inputVatDeductible = pkg.rollup.inputVatDeductible;
       includedDocuments = pkg.rollup.includedDocuments;
       excludedDocuments = pkg.rollup.excludedDocuments;
+      exportReady = pkg.exportReady;
     }
   } catch {
     // optional
@@ -845,8 +869,10 @@ export async function runIncrementalDocumentProcess(
     skipped,
     failureCount: failures.length,
     elsterApplied,
+    repaired,
+    bankFilled,
     vatPayable,
-    fileIds: filesToProcess.map((f) => f.id),
+    fileIds: batchFileIds,
   });
 
   return {
@@ -862,6 +888,9 @@ export async function runIncrementalDocumentProcess(
     elsterApplied,
     includedDocuments,
     excludedDocuments,
+    exportReady,
+    repaired,
+    bankFilled,
   };
 }
 

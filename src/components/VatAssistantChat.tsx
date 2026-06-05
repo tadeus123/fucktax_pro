@@ -12,6 +12,10 @@ import {
   type FilingTodoItem,
   type ParsedActionLine,
 } from "@/lib/filing-todos";
+import {
+  formatUploadProcessReply,
+  shouldRunBackendElsterRefresh,
+} from "@/lib/vat/reprocess-elster";
 import type { ProcessedDocumentSummary } from "@/lib/process/types";
 import { uploadFilingFiles } from "@/lib/upload";
 
@@ -245,6 +249,11 @@ export function VatAssistantChat({
     vatPayable?: number;
     inputVatDeductible?: number;
     elsterApplied?: number;
+    includedDocuments?: number;
+    excludedDocuments?: number;
+    exportReady?: boolean;
+    repaired?: number;
+    bankFilled?: number;
   }> {
     const response = await fetch("/api/process", {
       method: "POST",
@@ -263,6 +272,9 @@ export function VatAssistantChat({
       elsterApplied?: number;
       includedDocuments?: number;
       excludedDocuments?: number;
+      exportReady?: boolean;
+      repaired?: number;
+      bankFilled?: number;
     };
     if (!response.ok) {
       throw new Error(data.error ?? "Processing failed");
@@ -284,62 +296,22 @@ export function VatAssistantChat({
       elsterApplied?: number;
       includedDocuments?: number;
       excludedDocuments?: number;
+      exportReady?: boolean;
+      repaired?: number;
+      bankFilled?: number;
     },
   ): string {
-    const docs = processResult.recentDocuments ?? [];
-    const extracted = docs.filter((d) => d.status === "extracted");
+    const extracted = (processResult.recentDocuments ?? []).filter((d) => d.status === "extracted");
 
     if (extracted.length === 0 && fileNames.length > 0) {
       const failHint =
         processResult.failures?.join(" ") ??
         "Upload succeeded but extraction returned no invoice data.";
-      if (userText.trim()) {
-        return `${userText.trim()}\n\n[Upload issue: ${failHint} Files: ${fileNames.join(", ")}]`;
-      }
-      return `Uploaded ${stored} file(s) but extraction failed: ${failHint}`;
+      return `Upload failed: ${failHint}\nFiles: ${fileNames.join(", ")}`;
     }
 
-    const lines = extracted.map((d) => {
-      const amounts = [
-        d.grossAmount != null ? `gross €${d.grossAmount.toFixed(2)}` : null,
-        d.vatAmount != null ? `VAT €${d.vatAmount.toFixed(2)}` : null,
-      ]
-        .filter(Boolean)
-        .join(", ");
-      const bank = d.matchedBank ? "bank matched" : "no bank match yet";
-      const warn = d.error ? ` — ${d.error}` : "";
-      return `${d.filename}: ${d.counterparty ?? "unknown supplier"}${amounts ? ` (${amounts})` : ""} — ${bank}${warn}`;
-    });
-
-    const inputVat = processResult.inputVatDeductible ?? 0;
-    const payable = processResult.vatPayable ?? 0;
-    const included = processResult.includedDocuments;
-    const excluded = processResult.excludedDocuments;
-
-    const stats: string[] = [];
-    if (processResult.vatPayable != null) {
-      stats.push(
-        payable <= 0 && inputVat > 0
-          ? `VAT payable €${payable.toFixed(2)} (Vorsteuer €${inputVat.toFixed(2)} deducted — refund or zero due).`
-          : `VAT payable €${payable.toFixed(2)} (input Vorsteuer €${inputVat.toFixed(2)}).`,
-      );
-    }
-    if (included != null) stats.push(`Included in ELSTER rollup: ${included}.`);
-    if (excluded != null) stats.push(`Excluded from rollup: ${excluded}.`);
-
-    return [
-      userText.trim() ? `${userText.trim()}\n` : "",
-      `Uploaded and extracted ${extracted.length} document(s):`,
-      ...lines,
-      "",
-      ...stats,
-      processResult.elsterApplied
-        ? `${processResult.elsterApplied} invoice(s) filed as de_supplier_19.`
-        : "",
-      `Auto bank matches: ${processResult.matched ?? 0}. Download ELSTER XML to verify Kz66/Kz98.`,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const prefix = userText.trim() ? `${userText.trim()}\n\n` : "";
+    return prefix + formatUploadProcessReply(processResult, fileNames);
   }
 
   async function saveUploadSummary(
@@ -389,6 +361,43 @@ export function VatAssistantChat({
   ) {
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    if (shouldRunBackendElsterRefresh(trimmed)) {
+      await waitForAssistantIdle();
+      assistantBusyRef.current = true;
+      setSending(true);
+      setActivity("Updating ELSTER from backend…");
+      setError("");
+      if (options?.clearInput !== false) setInput("");
+      if (!options?.skipUserBubble) {
+        setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+      }
+
+      try {
+        const response = await fetch("/api/vat-assistant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filingPeriodId, message: trimmed, stream: true }),
+        });
+        if (!response.ok) {
+          const body = (await response.json()) as { error?: string };
+          throw new Error(body.error ?? "Update failed");
+        }
+        const body = await readStreamedAssistantResponse(response);
+        setMessages((prev) => [...prev, { role: "assistant", content: body.reply }]);
+        if (body.elsterUpdated && body.vatPayable != null) {
+          onElsterUpdated?.({ vatPayable: body.vatPayable });
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Update failed");
+      } finally {
+        assistantBusyRef.current = false;
+        setSending(false);
+        setActivity(null);
+        inputRef.current?.focus();
+      }
+      return;
+    }
 
     await waitForAssistantIdle();
     assistantBusyRef.current = true;
@@ -470,6 +479,9 @@ export function VatAssistantChat({
       elsterApplied?: number;
       includedDocuments?: number;
       excludedDocuments?: number;
+      exportReady?: boolean;
+      repaired?: number;
+      bankFilled?: number;
     };
   } | null> {
     if (uploadingRef.current) {
