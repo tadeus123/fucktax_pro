@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 
 type UploadZoneProps = {
   title: string;
+  hint?: string;
   accept: string;
   onFilesSelected: (files: File[]) => void;
   files: File[];
@@ -13,6 +14,7 @@ type UploadZoneProps = {
 
 export function UploadZone({
   title,
+  hint,
   accept,
   onFilesSelected,
   files,
@@ -64,7 +66,14 @@ export function UploadZone({
         {done ? (
           <p className="mt-3 text-sm text-zinc-500">{files.length} files</p>
         ) : active ? (
-          <p className="mt-3 text-sm text-zinc-400">drop here</p>
+          <>
+            {hint ? (
+              <p className="mt-3 max-w-[220px] text-[11px] leading-relaxed text-zinc-600">
+                {hint}
+              </p>
+            ) : null}
+            <p className="mt-3 text-sm text-zinc-500">drop here</p>
+          </>
         ) : null}
         <input
           ref={inputRef}
