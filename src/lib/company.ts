@@ -1,71 +1,57 @@
-export type CompanyRow = {
-  label: string;
-  value: string;
-  note?: string;
-};
-
-export type CompanySection = {
+export type CompanyNote = {
   title: string;
-  rows: CompanyRow[];
+  lines: string[];
 };
 
 export const COMPANY = {
   name: "HUGE Production GmbH",
-  tagline: "GmbH · Dresden · HRB 46720",
+  tagline: "GmbH · Dresden",
 };
 
-export const COMPANY_SECTIONS: CompanySection[] = [
+export const COMPANY_NOTES: CompanyNote[] = [
   {
-    title: "tax",
-    rows: [
-      { label: "Finanzamt", value: "Finanzamt Dresden Nord" },
-      { label: "BFN", value: "3202" },
-      { label: "Steuernummer", value: "202/110/00377" },
-      { label: "USt-ID", value: "DE455105120" },
-      { label: "VAT rhythm", value: "Quarterly" },
-      { label: "Fiscal year", value: "Calendar year" },
-      { label: "First tax year", value: "2025" },
+    title: "how a GmbH works",
+    lines: [
+      "The company pays tax on profit.",
+      "Founders pay tax when money leaves the GmbH to you personally.",
     ],
   },
   {
-    title: "legal",
-    rows: [
-      { label: "Address", value: "Sebnitzer Str. 35\n01099 Dresden" },
-      { label: "Register", value: "AG Dresden · HRB 46720" },
-      { label: "Share capital", value: "25,000 EUR" },
-      {
-        label: "Shareholders",
-        value: "Tadeus Mehl 50%\nKonstantin Saifoulline 50%",
-      },
+    title: "Körperschaftsteuer",
+    lines: [
+      "Tax on GmbH profit.",
+      "15% + Soli 0.825% → 15.825% total.",
     ],
   },
   {
-    title: "rates",
-    rows: [
-      { label: "KSt + Soli", value: "15.825%" },
-      { label: "GewSt Dresden", value: "15.75%" },
-      { label: "Total profit tax", value: "31.575%" },
+    title: "Gewerbesteuer",
+    lines: ["Dresden GmbH: 15.75% on profit."],
+  },
+  {
+    title: "Umsatzsteuer",
+    lines: [
+      "We file quarterly.",
+      "Usually 19%, sometimes 7%, sometimes 0 — depends what we sell.",
+      "We collect VAT from customers. We pay VAT on purchases.",
+      "End of period: pay the difference to Finanzamt — or get a refund.",
     ],
   },
   {
-    title: "people",
-    rows: [
-      { label: "Geschäftsführer", value: "Tadeus Mehl\nKonstantin Saifoulline" },
-      { label: "Representation", value: "Einzelvertretung" },
+    title: "what Finanzamt expects",
+    lines: [
+      "Quarterly VAT filing",
+      "Annual VAT return (USt-Jahreserklärung)",
+      "Körperschaftsteuererklärung",
+      "Gewerbesteuererklärung",
+      "Balance sheet + profit/loss (Jahresabschluss)",
     ],
   },
   {
-    title: "bank",
-    rows: [
-      { label: "Finom", value: "DE93 1001 8000 0392 6629 11" },
-      { label: "BIC", value: "FNOMDEB2" },
-    ],
-  },
-  {
-    title: "annual filings 2025",
-    rows: [
-      { label: "Tax", value: "KSt · GewSt · USt-Jahreserklärung · E-Bilanz" },
-      { label: "JA", value: "Bilanz · GuV · Anhang · Offenlegung" },
+    title: "what to do first",
+    lines: [
+      "1. VAT filings (quarterly) — most urgent",
+      "2. Jahresabschluss 2025",
+      "3. Annual tax returns 2025 — by 31 Jul 2026",
     ],
   },
 ];
