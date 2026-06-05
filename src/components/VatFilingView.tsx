@@ -16,7 +16,10 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 py-10">
       <div className="mb-10 text-center">
-        <h1 className="text-3xl font-medium tracking-tight text-white">{filing.label}</h1>
+        <h1 className="text-3xl font-medium tracking-tight text-white">
+          <span className="text-zinc-600">VAT-Prefilling </span>
+          {filing.label}
+        </h1>
         <p className="mt-2 text-sm text-zinc-600">{periodRange}</p>
       </div>
 
