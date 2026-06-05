@@ -159,6 +159,14 @@ export async function updateFilingTodoStatus(
   return true;
 }
 
+export async function deleteFilingTodo(id: string): Promise<boolean> {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase.from("filing_todos").delete().eq("id", id);
+
+  if (error) throw new Error(error.message);
+  return true;
+}
+
 /** Only auto-add invoice recovery lines — manual + todo for everything else. */
 export async function syncAutoTodosFromMessage(
   filingPeriodId: string,

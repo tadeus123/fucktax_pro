@@ -40,14 +40,11 @@ export function VatAssistantChat({
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const todoFileInputRef = useRef<HTMLInputElement>(null);
-  const pendingTodoIdRef = useRef<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [activity, setActivity] = useState<string | null>(null);
   const [todos, setTodos] = useState<FilingTodoItem[]>([]);
-  const [todoUploadingId, setTodoUploadingId] = useState<string | null>(null);
+  const [deletingTodoId, setDeletingTodoId] = useState<string | null>(null);
   const [savingTodoKeys, setSavingTodoKeys] = useState<Set<string>>(new Set());
-  const [resolvingTodoId, setResolvingTodoId] = useState<string | null>(null);
   const assistantBusyRef = useRef(false);
   const uploadingRef = useRef(false);
 
@@ -137,31 +134,24 @@ export function VatAssistantChat({
     [filingPeriodId, refreshTodos, savingTodoKeys, todos],
   );
 
-  const resolveTodo = useCallback(
-    async (id: string, status: "uploaded" | "not_found" | "done") => {
-      setResolvingTodoId(id);
+  const deleteTodo = useCallback(
+    async (id: string) => {
+      setDeletingTodoId(id);
       setError("");
       try {
-        const response = await fetch(`/api/filing-todos/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
-        });
+        const response = await fetch(`/api/filing-todos/${id}`, { method: "DELETE" });
         const body = (await response.json()) as { error?: string };
         if (!response.ok) {
-          throw new Error(body.error ?? "Could not update todo");
+          throw new Error(body.error ?? "Could not remove todo");
         }
         await refreshTodos();
-        void logClientChatEvent(filingPeriodId, "client_quick_prompt", `todo_${status}`, {
-          todoId: id,
-        });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not update todo");
+        setError(err instanceof Error ? err.message : "Could not remove todo");
       } finally {
-        setResolvingTodoId(null);
+        setDeletingTodoId(null);
       }
     },
-    [filingPeriodId, refreshTodos],
+    [refreshTodos],
   );
 
   async function readStreamedAssistantResponse(response: Response): Promise<{
@@ -286,7 +276,7 @@ export function VatAssistantChat({
     await postUserMessage(text);
   }
 
-  async function uploadFiles(files: File[], todo?: FilingTodoItem) {
+  async function uploadFiles(files: File[]) {
     if (uploadingRef.current) {
       setError("Upload already in progress — wait for it to finish.");
       return;
@@ -308,7 +298,6 @@ export function VatAssistantChat({
     void logClientChatEvent(filingPeriodId, "client_upload", `${files.length} file(s)`, {
       documentCount: docFiles.length,
       bankCount: bankFiles.length,
-      todoVendor: todo?.vendor,
     });
 
     let userMsg = "";
@@ -339,13 +328,7 @@ export function VatAssistantChat({
         await runProcess({ filingPeriodId, bank: true });
       }
 
-      userMsg = todo
-        ? `Uploaded invoice for ${todo.vendor} (${stored} file(s)). Process and update ELSTER.`
-        : `Uploaded ${stored} file(s). Process and update ELSTER.`;
-
-      if (todo) {
-        await resolveTodo(todo.id, "uploaded");
-      }
+      userMsg = `Uploaded ${stored} file(s). Process and update ELSTER.`;
 
       setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
     } catch (err) {
@@ -354,8 +337,6 @@ export function VatAssistantChat({
     } finally {
       uploadingRef.current = false;
       setUploading(false);
-      setTodoUploadingId(null);
-      pendingTodoIdRef.current = null;
       setActivity(null);
     }
 
@@ -370,25 +351,6 @@ export function VatAssistantChat({
     event.target.value = "";
     if (files.length === 0) return;
     await uploadFiles(files);
-  }
-
-  async function handleTodoUpload(event: ChangeEvent<HTMLInputElement>) {
-    const picked = event.target.files;
-    const todoId = pendingTodoIdRef.current;
-    const files = picked ? Array.from(picked) : [];
-    event.target.value = "";
-    if (files.length === 0 || !todoId) return;
-
-    const todo = todos.find((t) => t.id === todoId);
-    if (!todo) return;
-
-    setTodoUploadingId(todoId);
-    await uploadFiles(files, todo);
-  }
-
-  function startTodoUpload(todoId: string) {
-    pendingTodoIdRef.current = todoId;
-    todoFileInputRef.current?.click();
   }
 
   return (
@@ -436,14 +398,6 @@ export function VatAssistantChat({
             className="hidden"
             onChange={(e) => void handleChatUpload(e)}
           />
-          <input
-            ref={todoFileInputRef}
-            type="file"
-            multiple
-            accept=".pdf,.jpg,.jpeg,.png,.heic,.webp"
-            className="hidden"
-            onChange={(e) => void handleTodoUpload(e)}
-          />
           <form
             className="mx-auto flex max-w-2xl items-center gap-2"
             onSubmit={(e) => {
@@ -484,11 +438,8 @@ export function VatAssistantChat({
 
       <FilingTodoPanel
         items={todos}
-        uploadingId={todoUploadingId}
-        resolvingId={resolvingTodoId}
-        onUpload={startTodoUpload}
-        onNotFound={(id) => void resolveTodo(id, "not_found")}
-        onDone={(id) => void resolveTodo(id, "done")}
+        deletingId={deletingTodoId}
+        onDelete={(id) => void deleteTodo(id)}
       />
     </div>
   );

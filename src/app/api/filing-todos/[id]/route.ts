@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { FilingTodoStatus } from "@/lib/filing-todos";
-import { updateFilingTodoStatus } from "@/lib/supabase/filing-todos-queries";
+import {
+  deleteFilingTodo,
+  updateFilingTodoStatus,
+} from "@/lib/supabase/filing-todos-queries";
 
 export async function PATCH(
   request: NextRequest,
@@ -20,6 +23,22 @@ export async function PATCH(
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to update todo" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await context.params;
+    await deleteFilingTodo(id);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to delete todo" },
       { status: 500 },
     );
   }
