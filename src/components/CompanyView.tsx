@@ -36,7 +36,7 @@ function Section({ note }: { note: CompanyNote }) {
 export function CompanyView() {
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-6 py-10">
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-2xl px-2">
         <header className="mb-12 text-center">
           <h1 className="text-2xl font-medium tracking-tight text-white">{COMPANY.name}</h1>
           <p className="mt-2 text-sm text-zinc-600">{COMPANY.tagline}</p>
