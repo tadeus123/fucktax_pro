@@ -49,6 +49,7 @@ export function VatAssistantChat({
   const [savingTodoKeys, setSavingTodoKeys] = useState<Set<string>>(new Set());
   const [resolvingTodoId, setResolvingTodoId] = useState<string | null>(null);
   const assistantBusyRef = useRef(false);
+  const uploadingRef = useRef(false);
 
   const displayMessages = visibleMessages(messages);
   const showActivity = loading || sending || uploading || activity != null;
@@ -213,8 +214,12 @@ export function VatAssistantChat({
     throw new Error("Assistant ended without a reply");
   }
 
-  async function waitForAssistantIdle(): Promise<void> {
+  async function waitForAssistantIdle(maxMs = 120_000): Promise<void> {
+    const started = Date.now();
     while (assistantBusyRef.current) {
+      if (Date.now() - started > maxMs) {
+        throw new Error("Assistant is still busy — try again in a moment.");
+      }
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
   }
@@ -223,6 +228,7 @@ export function VatAssistantChat({
     const response = await fetch("/api/process", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify(body),
     });
     const data = (await response.json()) as { error?: string };
@@ -231,7 +237,10 @@ export function VatAssistantChat({
     }
   }
 
-  async function postUserMessage(text: string, options?: { clearInput?: boolean }) {
+  async function postUserMessage(
+    text: string,
+    options?: { clearInput?: boolean; skipUserBubble?: boolean },
+  ) {
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -241,12 +250,15 @@ export function VatAssistantChat({
     setActivity("Sending…");
     setError("");
     if (options?.clearInput !== false) setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+    if (!options?.skipUserBubble) {
+      setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+    }
 
     try {
       const response = await fetch("/api/vat-assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ filingPeriodId, message: trimmed, stream: true }),
       });
 
@@ -275,24 +287,38 @@ export function VatAssistantChat({
   }
 
   async function uploadFiles(files: File[], todo?: FilingTodoItem) {
+    if (uploadingRef.current) {
+      setError("Upload already in progress — wait for it to finish.");
+      return;
+    }
+
     const bankExt = /\.(csv|xlsx|xls|ofx|qif|mt940|sta)$/i;
     const bankFiles = files.filter((f) => bankExt.test(f.name));
     const docFiles = files.filter((f) => !bankExt.test(f.name));
 
-    if (docFiles.length === 0 && bankFiles.length === 0) return;
+    if (docFiles.length === 0 && bankFiles.length === 0) {
+      setError("No supported files selected (PDF, images, or bank CSV).");
+      return;
+    }
 
+    uploadingRef.current = true;
     setUploading(true);
-    setActivity("Uploading files…");
+    setActivity(`Uploading ${files.length} file(s)…`);
+    setError("");
     void logClientChatEvent(filingPeriodId, "client_upload", `${files.length} file(s)`, {
       documentCount: docFiles.length,
       bankCount: bankFiles.length,
       todoVendor: todo?.vendor,
     });
 
+    let userMsg = "";
+
     try {
       let stored = 0;
       if (docFiles.length > 0) {
-        const r = await uploadFilingFiles(filingPeriodId, "document", docFiles);
+        const r = await uploadFilingFiles(filingPeriodId, "document", docFiles, ({ completed, total }) => {
+          setActivity(`Uploading ${completed}/${total}…`);
+        });
         stored += r.stored;
       }
       if (bankFiles.length > 0) {
@@ -313,41 +339,51 @@ export function VatAssistantChat({
         await runProcess({ filingPeriodId, bank: true });
       }
 
-      const userMsg = todo
+      userMsg = todo
         ? `Uploaded invoice for ${todo.vendor} (${stored} file(s)). Process and update ELSTER.`
         : `Uploaded ${stored} file(s). Process and update ELSTER.`;
 
       if (todo) {
         await resolveTodo(todo.id, "uploaded");
       }
-      await postUserMessage(userMsg, { clearInput: false });
+
+      setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
+      return;
     } finally {
+      uploadingRef.current = false;
       setUploading(false);
       setTodoUploadingId(null);
       pendingTodoIdRef.current = null;
+      setActivity(null);
+    }
+
+    if (userMsg) {
+      void postUserMessage(userMsg, { clearInput: false, skipUserBubble: true });
     }
   }
 
   async function handleChatUpload(event: ChangeEvent<HTMLInputElement>) {
-    const fileList = event.target.files;
-    if (!fileList?.length || uploading) return;
+    const picked = event.target.files;
+    const files = picked ? Array.from(picked) : [];
     event.target.value = "";
-    await uploadFiles(Array.from(fileList));
+    if (files.length === 0) return;
+    await uploadFiles(files);
   }
 
   async function handleTodoUpload(event: ChangeEvent<HTMLInputElement>) {
-    const fileList = event.target.files;
+    const picked = event.target.files;
     const todoId = pendingTodoIdRef.current;
-    if (!fileList?.length || !todoId || uploading) return;
+    const files = picked ? Array.from(picked) : [];
+    event.target.value = "";
+    if (files.length === 0 || !todoId) return;
 
     const todo = todos.find((t) => t.id === todoId);
-    event.target.value = "";
     if (!todo) return;
 
     setTodoUploadingId(todoId);
-    await uploadFiles(Array.from(fileList), todo);
+    await uploadFiles(files, todo);
   }
 
   function startTodoUpload(todoId: string) {
@@ -417,8 +453,11 @@ export function VatAssistantChat({
           >
             <button
               type="button"
-              disabled={loading || uploading}
-              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              onClick={() => {
+                setError("");
+                fileInputRef.current?.click();
+              }}
               className="flex h-9 w-9 shrink-0 items-center justify-center text-zinc-600 transition hover:text-zinc-400 disabled:opacity-40"
               title="Add files"
             >

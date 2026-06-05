@@ -10,6 +10,16 @@ export type UploadResult = {
   received: number;
 };
 
+const MAX_BYTES_PER_REQUEST = 4 * 1024 * 1024;
+
+async function parseUploadError(response: Response): Promise<string> {
+  if (response.status === 413) {
+    return "File too large for server (max ~4 MB per upload). Try one PDF at a time.";
+  }
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  return body?.error ?? `Upload failed (HTTP ${response.status})`;
+}
+
 export async function uploadFilingFiles(
   filingPeriodId: string,
   kind: "document" | "bank",
@@ -18,31 +28,34 @@ export async function uploadFilingFiles(
 ): Promise<UploadResult> {
   let stored = 0;
   let received = 0;
-  const batchSize = kind === "bank" ? 1 : 8;
 
-  for (let offset = 0; offset < files.length; offset += batchSize) {
-    const batch = files.slice(offset, offset + batchSize);
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index]!;
+    if (file.size > MAX_BYTES_PER_REQUEST) {
+      throw new Error(
+        `"${file.name}" is ${(file.size / (1024 * 1024)).toFixed(1)} MB — max ~4 MB per file. Split or compress.`,
+      );
+    }
+
     const formData = new FormData();
     formData.append("filingPeriodId", filingPeriodId);
     formData.append("kind", kind);
-    for (const file of batch) {
-      formData.append("files", file, getUploadRelativePath(file));
-    }
+    formData.append("files", file, getUploadRelativePath(file));
 
     const response = await fetch("/api/upload", {
       method: "POST",
       body: formData,
+      credentials: "same-origin",
     });
 
     if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(body?.error ?? "Upload failed");
+      throw new Error(await parseUploadError(response));
     }
 
     const body = (await response.json()) as { stored?: number; received?: number };
-    stored += body.stored ?? batch.length;
-    received += body.received ?? batch.length;
-    onProgress?.({ completed: Math.min(offset + batch.length, files.length), total: files.length });
+    stored += body.stored ?? 1;
+    received += body.received ?? 1;
+    onProgress?.({ completed: index + 1, total: files.length });
   }
 
   return { stored, received };
