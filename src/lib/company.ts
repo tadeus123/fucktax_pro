@@ -21,9 +21,6 @@ export const COMPANY_NOTES: CompanyNote[] = [
         kind: "text",
         value: "Founders pay tax when money leaves the GmbH to you personally.",
       },
-      { kind: "data", value: "Sebnitzer Str. 35 · 01099 Dresden" },
-      { kind: "data", value: "Tadeus Mehl & Konstantin Saifoulline · 50/50" },
-      { kind: "data", value: "Share capital 25,000 EUR" },
     ],
   },
   {
@@ -85,8 +82,11 @@ export const COMPANY_NOTES: CompanyNote[] = [
     ],
   },
   {
-    title: "bank",
+    title: "company",
     lines: [
+      { kind: "data", value: "Sebnitzer Str. 35 · 01099 Dresden" },
+      { kind: "data", value: "Tadeus Mehl & Konstantin Saifoulline · 50/50" },
+      { kind: "data", value: "Share capital 25,000 EUR" },
       { kind: "data", value: "Finom · DE93 1001 8000 0392 6629 11" },
       { kind: "data", value: "BIC FNOMDEB2" },
     ],
