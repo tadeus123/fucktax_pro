@@ -8,6 +8,7 @@ import {
   JAHRESABSCHLUSS,
   STEUERERKLAERUNG,
   VAT_FILINGS,
+  getFilingDeadlineById,
   type FilingStatus,
   type GenericFiling,
   type VatFiling,
@@ -57,27 +58,39 @@ function sidebarLabel(row: FilingPeriodRow): string {
   return row.label;
 }
 
-function rowToVatFiling(row: FilingPeriodRow): VatFiling {
+function withCanonicalDeadline(row: FilingPeriodRow): FilingPeriodRow {
+  const canonical = getFilingDeadlineById(row.id);
+  if (!canonical) return row;
   return {
-    id: row.id,
-    label: row.label,
-    periodStart: row.period_start ?? "",
-    periodEnd: row.period_end ?? "",
-    deadline: row.deadline,
-    deadlineLabel: row.deadline_label,
-    status: row.status,
+    ...row,
+    deadline: canonical.deadline,
+    deadline_label: canonical.deadlineLabel,
+  };
+}
+
+function rowToVatFiling(row: FilingPeriodRow): VatFiling {
+  const resolved = withCanonicalDeadline(row);
+  return {
+    id: resolved.id,
+    label: resolved.label,
+    periodStart: resolved.period_start ?? "",
+    periodEnd: resolved.period_end ?? "",
+    deadline: resolved.deadline,
+    deadlineLabel: resolved.deadline_label,
+    status: resolved.status,
   };
 }
 
 function rowToGenericFiling(row: FilingPeriodRow): GenericFiling {
+  const resolved = withCanonicalDeadline(row);
   return {
-    id: row.route_segment,
-    label: row.label,
-    periodLabel: row.period_label ?? "",
-    deadline: row.deadline,
-    deadlineLabel: row.deadline_label,
-    status: row.status,
-    description: row.description ?? "",
+    id: resolved.route_segment,
+    label: resolved.label,
+    periodLabel: resolved.period_label ?? "",
+    deadline: resolved.deadline,
+    deadlineLabel: resolved.deadline_label,
+    status: resolved.status,
+    description: resolved.description ?? "",
   };
 }
 
@@ -115,12 +128,15 @@ export async function getSidebarFilings(): Promise<SidebarFiling[]> {
     return getSidebarFilingsFallback();
   }
 
-  return (data as FilingPeriodRow[]).map((row) => ({
-    href: filingHref(row),
-    label: sidebarLabel(row),
-    deadline: row.deadline,
-    filingType: row.filing_type,
-  }));
+  return (data as FilingPeriodRow[]).map((row) => {
+    const resolved = withCanonicalDeadline(row);
+    return {
+      href: filingHref(resolved),
+      label: sidebarLabel(resolved),
+      deadline: resolved.deadline,
+      filingType: resolved.filing_type,
+    };
+  });
 }
 
 function getSidebarFilingsFallback(): SidebarFiling[] {

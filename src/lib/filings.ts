@@ -92,13 +92,37 @@ const shortDeadlineFmt = new Intl.DateTimeFormat("en-GB", {
   month: "short",
 });
 
+function parseDateOnly(isoDate: string): Date {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** Canonical deadlines — app source of truth when Supabase rows are stale. */
+export function getFilingDeadlineById(
+  id: string,
+): { deadline: string; deadlineLabel: string } | undefined {
+  const vat = VAT_FILINGS.find((f) => f.id === id);
+  if (vat) {
+    return { deadline: vat.deadline, deadlineLabel: vat.deadlineLabel };
+  }
+  if (id === "2025-ja") {
+    const f = JAHRESABSCHLUSS[0];
+    return { deadline: f.deadline, deadlineLabel: f.deadlineLabel };
+  }
+  if (id === "2025-steuer") {
+    const f = STEUERERKLAERUNG[0];
+    return { deadline: f.deadline, deadlineLabel: f.deadlineLabel };
+  }
+  return undefined;
+}
+
 /** e.g. "10 Feb" */
 export function formatShortDeadline(deadline: string): string {
-  return shortDeadlineFmt.format(new Date(deadline));
+  return shortDeadlineFmt.format(parseDateOnly(deadline));
 }
 
 export function daysUntilDeadline(deadline: string, now = new Date()): number {
-  const due = new Date(deadline);
+  const due = parseDateOnly(deadline);
   due.setHours(23, 59, 59, 999);
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);

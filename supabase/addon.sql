@@ -1,7 +1,9 @@
 -- fucktax Pro — ADD-ON (run after schema.sql)
--- Supabase Dashboard → SQL Editor → paste → Run
+-- Supabase Dashboard → SQL Editor → paste ALL of this file → Run
 --
 -- Adds: company profile/content tables, route_segment for filings, seed data.
+-- IMPORTANT: Run from line 1 — deadline updates at the top are not optional.
+-- Or run supabase/sync-deadlines.sql alone to fix sidebar dates only.
 
 -- ---------------------------------------------------------------------------
 -- Filing periods: URL segment (e.g. /jahresabschluss/2025)
