@@ -65,14 +65,20 @@ export const COMPANY_NOTES: CompanyNote[] = [
     ],
   },
   {
-    title: "what Finanzamt expects",
+    title: "during the year",
     lines: [
       { kind: "text", value: "Quarterly VAT filing (Umsatzsteuer-Voranmeldung)" },
-      { kind: "text", value: "Annual VAT return (USt-Jahreserklärung)" },
+    ],
+  },
+  {
+    title: "end of year",
+    lines: [
       { kind: "text", value: "Körperschaftsteuererklärung" },
       { kind: "text", value: "Gewerbesteuererklärung" },
+      { kind: "text", value: "Annual VAT return (USt-Jahreserklärung)" },
       { kind: "text", value: "Balance sheet + profit/loss (Jahresabschluss)" },
-      { kind: "data", value: "Annual filings deadline 31 Jul 2026" },
+      { kind: "data", value: "Jahresabschluss 2025 · 30 Jun 2026" },
+      { kind: "data", value: "Tax returns 2025 · 31 Jul 2026" },
     ],
   },
   {
