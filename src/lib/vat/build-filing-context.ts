@@ -6,6 +6,7 @@ import {
 } from "@/lib/vat/quarter-cashflow";
 import type { ReviewData } from "@/lib/supabase/queries";
 import { getReviewData } from "@/lib/supabase/queries";
+import { matchesVendorPattern } from "@/lib/vat/vendor-match";
 
 export type BankBucket = {
   label: string;
@@ -148,7 +149,7 @@ export async function searchFilingData(
     };
   }
 
-  const matchesPattern = (text: string) => text.toLowerCase().includes(needle);
+  const matchesPattern = (text: string) => matchesVendorPattern(text, needle);
 
   const bank =
     scope === "documents"

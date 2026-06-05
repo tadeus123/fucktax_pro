@@ -1,8 +1,9 @@
 import { logAppEvent } from "@/lib/app-events";
 import { dedupeBankRows, parseBankCsv, type ParsedBankRow } from "@/lib/process/bank-csv";
-import { extractDocument, shouldSkipDocumentFile } from "@/lib/process/documents";
-import type { ProcessResult } from "@/lib/process/types";
+import { extractDocument, shouldSkipDocumentFile, type DocumentExtraction } from "@/lib/process/documents";
+import type { ProcessedDocumentSummary, ProcessResult } from "@/lib/process/types";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
+import { inferSupplierFromFilename, matchesVendorPattern } from "@/lib/vat/vendor-match";
 
 type UploadedFileRow = {
   id: string;
@@ -30,6 +31,136 @@ function dedupeFilesByName(files: UploadedFileRow[]): UploadedFileRow[] {
     unique.push(file);
   }
   return unique;
+}
+
+function enrichExtractionFromFilename(
+  filename: string,
+  extraction: DocumentExtraction,
+): DocumentExtraction {
+  const supplier = inferSupplierFromFilename(filename);
+  if (!supplier) return extraction;
+
+  const cp = extraction.counterparty_name ?? "";
+  const cpIsCustomer = /huge production/i.test(cp);
+  const cpIsSupplier =
+    matchesVendorPattern(cp, supplier) || matchesVendorPattern(cp, "tokenize");
+
+  if (cpIsSupplier) return extraction;
+
+  if (cpIsCustomer || !cp.trim()) {
+    return {
+      ...extraction,
+      counterparty_name: supplier,
+      document_type:
+        extraction.document_type === "other" ? "supplier_invoice" : extraction.document_type,
+      vat_case: extraction.vat_case ?? "de_supplier_19",
+      confidence:
+        extraction.confidence === "do_not_deduct" && extraction.gross_amount != null
+          ? "likely"
+          : extraction.confidence,
+    };
+  }
+
+  return extraction;
+}
+
+function bankAmountMatchesDocument(
+  txAmount: number,
+  gross: number | null,
+  vat: number | null,
+): boolean {
+  const candidates = [gross, vat].filter((v): v is number => v != null && v > 0);
+  if (candidates.length === 0) return false;
+
+  for (const val of candidates) {
+    if (Math.abs(Math.abs(txAmount) - val) <= 0.05) return true;
+    if (Math.abs(txAmount + val) <= 0.05) return true;
+    if (Math.abs(txAmount - val) <= 0.05) return true;
+  }
+  return false;
+}
+
+function scoreDocumentBankMatch(
+  doc: {
+    gross_amount: number | null;
+    vat_amount: number | null;
+    invoice_date: string | null;
+    payment_date: string | null;
+    counterparty_name: string | null;
+  },
+  tx: {
+    amount: number;
+    transaction_date: string;
+    description: string | null;
+    counterparty: string | null;
+  },
+  filename: string,
+): number {
+  const gross = doc.gross_amount != null ? Number(doc.gross_amount) : null;
+  const vat = doc.vat_amount != null ? Number(doc.vat_amount) : null;
+  const amount = Number(tx.amount);
+
+  if (!bankAmountMatchesDocument(amount, gross, vat)) return 0;
+
+  let score = 10;
+  const docText = `${filename} ${doc.counterparty_name ?? ""}`;
+  const txText = `${tx.description ?? ""} ${tx.counterparty ?? ""}`;
+
+  if (matchesVendorPattern(docText, txText) || matchesVendorPattern(txText, docText)) {
+    score += 8;
+  }
+  if (matchesVendorPattern(docText, "tokenize") && matchesVendorPattern(txText, "tokenize")) {
+    score += 5;
+  }
+
+  const docDate = doc.payment_date ?? doc.invoice_date;
+  if (docDate) {
+    const days = daysBetween(String(docDate), tx.transaction_date);
+    if (days <= 28) score += 3;
+    else if (days > 90) score -= 4;
+  }
+
+  return score;
+}
+
+async function summarizeProcessedDocuments(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  filingPeriodId: string,
+  sessionId: string,
+  fileIds: string[],
+): Promise<ProcessedDocumentSummary[]> {
+  if (fileIds.length === 0) return [];
+
+  const [{ data: records }, { data: files }, { data: matchedTx }] = await Promise.all([
+    supabase
+      .from("document_records")
+      .select(
+        "id, file_id, counterparty_name, gross_amount, vat_amount, invoice_number, confidence",
+      )
+      .eq("filing_period_id", filingPeriodId)
+      .in("file_id", fileIds),
+    supabase.from("uploaded_files").select("id, original_filename").in("id", fileIds),
+    supabase
+      .from("bank_transactions")
+      .select("matched_document_id")
+      .eq("session_id", sessionId)
+      .not("matched_document_id", "is", null),
+  ]);
+
+  const filenameById = new Map((files ?? []).map((f) => [f.id, f.original_filename] as const));
+  const matchedDocIds = new Set(
+    (matchedTx ?? []).map((row) => row.matched_document_id).filter(Boolean),
+  );
+
+  return (records ?? []).map((row) => ({
+    filename: filenameById.get(row.file_id) ?? "unknown",
+    counterparty: row.counterparty_name,
+    grossAmount: row.gross_amount != null ? Number(row.gross_amount) : null,
+    vatAmount: row.vat_amount != null ? Number(row.vat_amount) : null,
+    invoiceNumber: row.invoice_number,
+    matchedBank: matchedDocIds.has(row.id),
+    confidence: row.confidence ?? "review",
+  }));
 }
 
 function filterBankRowsToPeriod(
@@ -138,10 +269,11 @@ async function processDocumentFiles(
       }
 
       const buffer = Buffer.from(await blob.arrayBuffer());
-      const extraction = await extractDocument(file.original_filename, file.mime_type, buffer, {
+      let extraction = await extractDocument(file.original_filename, file.mime_type, buffer, {
         periodStart,
         periodEnd,
       });
+      extraction = enrichExtractionFromFilename(file.original_filename, extraction);
 
       if (extraction.confidence === "do_not_deduct" && extraction.document_type === "other") {
         skipped += 1;
@@ -211,47 +343,58 @@ async function reconcileSession(
   await supabase
     .from("bank_transactions")
     .update({ matched_document_id: null, reconciliation_status: "unmatched" })
-    .eq("session_id", sessionId);
+    .eq("session_id", sessionId)
+    .eq("reconciliation_status", "matched");
 
-  const [{ data: documents }, { data: transactions }] = await Promise.all([
+  const [{ data: documents }, { data: transactions }, { data: files }] = await Promise.all([
     supabase
       .from("document_records")
-      .select("id, gross_amount, invoice_date, payment_date, counterparty_name")
+      .select(
+        "id, gross_amount, vat_amount, invoice_date, payment_date, counterparty_name, file_id",
+      )
       .eq("filing_period_id", filingPeriodId),
     supabase
       .from("bank_transactions")
-      .select("id, amount, transaction_date, description, counterparty, reconciliation_status, matched_document_id")
+      .select(
+        "id, amount, transaction_date, description, counterparty, reconciliation_status, matched_document_id",
+      )
       .eq("session_id", sessionId)
       .eq("reconciliation_status", "unmatched"),
+    supabase.from("uploaded_files").select("id, original_filename").eq("session_id", sessionId),
   ]);
 
   if (!documents?.length || !transactions?.length) return 0;
 
+  const filenameByFileId = new Map(
+    (files ?? []).map((f) => [f.id, f.original_filename] as const),
+  );
+
   let matched = 0;
 
   for (const doc of documents) {
-    if (doc.gross_amount == null) continue;
-    const gross = Number(doc.gross_amount);
-    const docDate = doc.payment_date ?? doc.invoice_date;
+    if (doc.gross_amount == null && doc.vat_amount == null) continue;
 
-    const candidate = transactions.find((tx) => {
-      if (tx.matched_document_id) return false;
-      const amount = Number(tx.amount);
-      const amountMatch =
-        Math.abs(amount + gross) <= 0.05 || Math.abs(amount - gross) <= 0.05;
-      if (!amountMatch) return false;
-      if (docDate && daysBetween(String(docDate), tx.transaction_date) > 28) return false;
-      return true;
-    });
+    const filename = filenameByFileId.get(doc.file_id) ?? "";
+    let best: (typeof transactions)[number] | null = null;
+    let bestScore = 0;
 
-    if (!candidate) continue;
+    for (const tx of transactions) {
+      if (tx.matched_document_id) continue;
+      const score = scoreDocumentBankMatch(doc, tx, filename);
+      if (score > bestScore) {
+        bestScore = score;
+        best = tx;
+      }
+    }
+
+    if (!best || bestScore < 10) continue;
 
     await supabase
       .from("bank_transactions")
       .update({ matched_document_id: doc.id, reconciliation_status: "matched" })
-      .eq("id", candidate.id);
+      .eq("id", best.id);
 
-    candidate.matched_document_id = doc.id;
+    best.matched_document_id = doc.id;
     matched += 1;
   }
 
@@ -407,6 +550,7 @@ export async function runIncrementalDocumentProcess(
       bankTransactions: 0,
       matched,
       needsReview: 0,
+      recentDocuments: [],
     };
   }
 
@@ -418,6 +562,12 @@ export async function runIncrementalDocumentProcess(
     filing.period_end,
   );
   const matched = await reconcileSession(supabase, session.id, filingPeriodId);
+  const recentDocuments = await summarizeProcessedDocuments(
+    supabase,
+    filingPeriodId,
+    session.id,
+    newFiles.map((f) => f.id),
+  );
 
   try {
     const { buildElsterExport } = await import("@/lib/vat/export-elster");
@@ -432,6 +582,7 @@ export async function runIncrementalDocumentProcess(
     bankTransactions: 0,
     matched,
     needsReview,
+    recentDocuments,
   };
 }
 

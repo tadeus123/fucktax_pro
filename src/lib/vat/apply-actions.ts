@@ -9,6 +9,7 @@ import {
   getElsterExportStatus,
 } from "@/lib/vat/elster-export-status";
 import { cashflowToToolResult, getQuarterCashflow } from "@/lib/vat/quarter-cashflow";
+import { matchesVendorPattern } from "@/lib/vat/vendor-match";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 
 export type ApplyResult = {
@@ -30,7 +31,7 @@ async function getSessionId(filingPeriodId: string): Promise<string | null> {
 }
 
 function matchesPattern(text: string, pattern: string): boolean {
-  return text.toLowerCase().includes(pattern.toLowerCase().trim());
+  return matchesVendorPattern(text, pattern);
 }
 
 export async function excludeDocumentsMatching(

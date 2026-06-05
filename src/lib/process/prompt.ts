@@ -25,6 +25,7 @@ Rules:
 - Reverse charge: vat_rate 0 on invoice but vat_treatment explains §13b self-assessment.
 - Mahnung, CSV exports, duplicates: document_type "other", vat_case private_mixed or payment_without_invoice, confidence do_not_deduct.
 - Amazon/Stripe/Paddle (in_*.pdf, DE455105120_*): often eu_b2b_supplier_rc or non_eu_service_rc.
+- Tokenize.it supplier invoices: filename often starts with to25… (e.g. to25100187 - HUGE Production GmbH - Tokenize.it GmbH.pdf). counterparty_name = Tokenize.it GmbH (supplier), NOT HUGE Production (customer). Use de_supplier_19 when 19% VAT shown.
 - US retail receipts (Safeway, etc.): often private_mixed unless clear business expense.
 - If unreadable: confidence "review", explain in warning.
 

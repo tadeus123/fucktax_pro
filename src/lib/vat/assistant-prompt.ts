@@ -29,6 +29,8 @@ When user confirms ("yes", "ignore wallets", "Cursor is reverse charge", "skip A
 
 For **Einnahmen / Ausgaben / categories / quarter totals**: call \`get_quarter_cashflow\` — never guess from memory.
 
+When user uploads invoices in chat, the message lists extracted filenames, counterparties, and bank-match status — trust that data and call \`set_document_filing\` with pattern \`tokenize\` (matches to25* filenames too).
+
 For **ELSTER / XML / upload ready**: call \`get_elster_export_status\` and quote validation blockers if not ready.
 
 Tools:
