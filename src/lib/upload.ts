@@ -1,12 +1,20 @@
-import { getUploadRelativePath } from "@/lib/folder-upload";
+import { getUploadRelativePath } from "@/lib/upload-files";
 
 const BATCH_SIZE = 20;
+
+export type UploadResult = {
+  stored: number;
+  received: number;
+};
 
 export async function uploadFilingFiles(
   filingPeriodId: string,
   kind: "document" | "bank",
   files: File[],
-): Promise<void> {
+): Promise<UploadResult> {
+  let stored = 0;
+  let received = 0;
+
   for (let offset = 0; offset < files.length; offset += BATCH_SIZE) {
     const batch = files.slice(offset, offset + BATCH_SIZE);
     const formData = new FormData();
@@ -25,5 +33,11 @@ export async function uploadFilingFiles(
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       throw new Error(body?.error ?? "Upload failed");
     }
+
+    const body = (await response.json()) as { stored?: number; received?: number };
+    stored += body.stored ?? batch.length;
+    received += body.received ?? batch.length;
   }
+
+  return { stored, received };
 }

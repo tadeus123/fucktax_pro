@@ -8,11 +8,13 @@ import { UploadZone } from "./UploadZone";
 export function VatFilingView({ filing }: { filing: VatFiling }) {
   const [documents, setDocuments] = useState<File[]>([]);
   const [bankFiles, setBankFiles] = useState<File[]>([]);
+  const [documentsStored, setDocumentsStored] = useState(0);
+  const [bankStored, setBankStored] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
 
-  const docsDone = documents.length > 0;
-  const bankDone = bankFiles.length > 0;
+  const docsDone = documentsStored > 0;
+  const bankDone = bankStored > 0;
   const ready = docsDone && bankDone;
   const periodRange = formatDateRange(filing.periodStart, filing.periodEnd);
 
@@ -22,11 +24,15 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
     setDocuments(incoming);
 
     const toUpload = incoming.slice(previousCount);
-    if (toUpload.length === 0) return;
+    if (toUpload.length === 0) {
+      if (incoming.length === 0) setDocumentsStored(0);
+      return;
+    }
 
     setUploading(true);
     try {
-      await uploadFilingFiles(filing.id, "document", toUpload);
+      const result = await uploadFilingFiles(filing.id, "document", toUpload);
+      setDocumentsStored((count) => count + result.stored);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -40,11 +46,15 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
     setBankFiles(incoming);
 
     const toUpload = incoming.slice(previousCount);
-    if (toUpload.length === 0) return;
+    if (toUpload.length === 0) {
+      if (incoming.length === 0) setBankStored(0);
+      return;
+    }
 
     setUploading(true);
     try {
-      await uploadFilingFiles(filing.id, "bank", toUpload);
+      const result = await uploadFilingFiles(filing.id, "bank", toUpload);
+      setBankStored((count) => count + result.stored);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -65,19 +75,22 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
       <div className="flex w-full max-w-2xl flex-col gap-4 sm:flex-row sm:gap-6">
         <UploadZone
           title="Documents"
-          hint="invoices · receipts · customs · folder or files"
-          accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.csv,.xlsx,.xls,.doc,.docx,.txt"
+          hint="any invoices, receipts, scans — folder or .zip"
+          uploadKind="document"
           allowFolder
           files={documents}
+          storedCount={documentsStored}
           onFilesSelected={handleDocuments}
           active={!docsDone && !uploading}
           done={docsDone}
         />
         <UploadZone
           title="Bank"
-          hint="bank export · CSV or PDF"
-          accept=".csv,.pdf,.xlsx,.xls,.txt,.ofx,.qif"
+          hint="CSV, PDF, or .zip with export"
+          accept=".csv,.pdf,.xlsx,.xls,.txt,.ofx,.qif,.xml,.zip"
+          uploadKind="bank"
           files={bankFiles}
+          storedCount={bankStored}
           onFilesSelected={handleBank}
           active={docsDone && !bankDone && !uploading}
           done={bankDone}
@@ -96,7 +109,7 @@ export function VatFilingView({ filing }: { filing: VatFiling }) {
       ) : (
         <p className="mt-12 h-11 text-sm text-zinc-700">
           {uploading
-            ? "uploading…"
+            ? "uploading & processing…"
             : !docsDone
               ? "upload documents first"
               : "then upload bank extract"}

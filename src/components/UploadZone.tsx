@@ -5,13 +5,16 @@ import {
   collectFilesFromDataTransfer,
   filterUploadFiles,
 } from "@/lib/folder-upload";
+import type { UploadKind } from "@/lib/upload-files";
 
 type UploadZoneProps = {
   title: string;
   hint?: string;
-  accept: string;
+  accept?: string;
+  uploadKind: UploadKind;
   onFilesSelected: (files: File[]) => void;
   files: File[];
+  storedCount?: number;
   active: boolean;
   done: boolean;
   allowFolder?: boolean;
@@ -21,8 +24,10 @@ export function UploadZone({
   title,
   hint,
   accept,
+  uploadKind,
   onFilesSelected,
   files,
+  storedCount = 0,
   active,
   done,
   allowFolder = false,
@@ -34,11 +39,11 @@ export function UploadZone({
 
   const addFiles = useCallback(
     (incoming: FileList | File[]) => {
-      const list = filterUploadFiles(Array.from(incoming), accept);
+      const list = filterUploadFiles(Array.from(incoming), uploadKind);
       if (list.length === 0) return;
       onFilesSelected([...files, ...list]);
     },
-    [accept, files, onFilesSelected],
+    [files, onFilesSelected, uploadKind],
   );
 
   async function handleDrop(e: React.DragEvent) {
@@ -47,7 +52,7 @@ export function UploadZone({
     if (allowFolder) {
       setScanning(true);
       try {
-        const collected = await collectFilesFromDataTransfer(e.dataTransfer, accept);
+        const collected = await collectFilesFromDataTransfer(e.dataTransfer, uploadKind);
         if (collected.length > 0) {
           onFilesSelected([...files, ...collected]);
         }
@@ -61,6 +66,13 @@ export function UploadZone({
 
   const emphasis = active || dragOver;
   const busy = scanning;
+  const dropLabel = allowFolder
+    ? busy
+      ? "reading folder…"
+      : "drop folder, zip, or files"
+    : busy
+      ? "reading…"
+      : "drop here";
 
   return (
     <div className="flex flex-1 flex-col">
@@ -92,7 +104,9 @@ export function UploadZone({
           {title}
         </p>
         {done ? (
-          <p className="mt-3 text-sm text-zinc-500">{files.length} files</p>
+          <p className="mt-3 text-sm text-zinc-500">
+            {storedCount > 0 ? `${storedCount} files stored` : `${files.length} selected`}
+          </p>
         ) : active ? (
           <>
             {hint ? (
@@ -100,9 +114,7 @@ export function UploadZone({
                 {hint}
               </p>
             ) : null}
-            <p className="mt-3 text-sm text-zinc-500">
-              {busy ? "reading folder…" : allowFolder ? "drop folder or files here" : "drop here"}
-            </p>
+            <p className="mt-3 text-sm text-zinc-500">{dropLabel}</p>
             {allowFolder && !busy ? (
               <button
                 type="button"

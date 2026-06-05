@@ -1,7 +1,12 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { expandUploadInputs, UploadIngestError } from "@/lib/upload-ingest";
+import { sanitizeStorageFilename, type UploadKind } from "@/lib/upload-files";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { getOrCreateUploadSession } from "@/lib/supabase/queries";
+
+export const maxDuration = 120;
+export const runtime = "nodejs";
 
 const BUCKETS = {
   document: "documents",
@@ -12,27 +17,36 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const filingPeriodId = String(formData.get("filingPeriodId") ?? "");
-    const kind = String(formData.get("kind") ?? "") as "document" | "bank";
+    const kind = String(formData.get("kind") ?? "") as UploadKind;
     const files = formData.getAll("files").filter((f): f is File => f instanceof File);
 
     if (!filingPeriodId || (kind !== "document" && kind !== "bank") || files.length === 0) {
       return NextResponse.json({ error: "Invalid upload request" }, { status: 400 });
     }
 
+    const inputs = await Promise.all(
+      files.map(async (file) => ({
+        relativePath: file.name,
+        buffer: Buffer.from(await file.arrayBuffer()),
+        mimeType: file.type || null,
+      })),
+    );
+
+    const ingested = expandUploadInputs(inputs, { kind });
+
     const supabase = createSupabaseAdmin();
     const sessionId = await getOrCreateUploadSession(filingPeriodId);
     const bucket = BUCKETS[kind];
     const uploaded: Array<{ id: string; name: string }> = [];
 
-    for (const file of files) {
-      const safeName = file.name.replace(/[^\w.\-() ]+/g, "_");
+    for (const file of ingested) {
+      const safeName = sanitizeStorageFilename(file.relativePath);
       const storagePath = `${filingPeriodId}/${sessionId}/${randomUUID()}-${safeName}`;
-      const buffer = Buffer.from(await file.arrayBuffer());
 
       const { error: storageError } = await supabase.storage
         .from(bucket)
-        .upload(storagePath, buffer, {
-          contentType: file.type || "application/octet-stream",
+        .upload(storagePath, file.buffer, {
+          contentType: file.mimeType,
           upsert: false,
         });
 
@@ -47,9 +61,9 @@ export async function POST(request: NextRequest) {
           kind,
           storage_bucket: bucket,
           storage_path: storagePath,
-          original_filename: file.name,
-          mime_type: file.type || null,
-          size_bytes: file.size,
+          original_filename: file.relativePath,
+          mime_type: file.mimeType,
+          size_bytes: file.buffer.byteLength,
         })
         .select("id, original_filename")
         .single();
@@ -61,8 +75,17 @@ export async function POST(request: NextRequest) {
       uploaded.push({ id: row.id, name: row.original_filename });
     }
 
-    return NextResponse.json({ ok: true, sessionId, uploaded });
+    return NextResponse.json({
+      ok: true,
+      sessionId,
+      uploaded,
+      received: files.length,
+      stored: uploaded.length,
+    });
   } catch (err) {
+    if (err instanceof UploadIngestError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     const message = err instanceof Error ? err.message : "Upload failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
