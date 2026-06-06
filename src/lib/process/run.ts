@@ -1,6 +1,7 @@
 import { logAppEvent } from "@/lib/app-events";
 import { dedupeBankRows, parseBankCsv, type ParsedBankRow } from "@/lib/process/bank-csv";
 import { extractDocument, shouldSkipDocumentFile, type DocumentExtraction } from "@/lib/process/documents";
+import { waitForOpenAiThrottle } from "@/lib/openai-client";
 import type { ProcessedDocumentSummary, ProcessResult } from "@/lib/process/types";
 import { createSupabaseAdmin } from "@/lib/supabase/server";
 import { inferSupplierFromFilename, matchesVendorPattern } from "@/lib/vat/vendor-match";
@@ -330,6 +331,10 @@ async function processDocumentFiles(
   const failures: string[] = [];
 
   for (const file of documentFiles) {
+    if (processed + skipped + failures.length > 0) {
+      await waitForOpenAiThrottle();
+    }
+
     const baseOutcome = {
       filename: file.original_filename,
       counterparty: null as string | null,

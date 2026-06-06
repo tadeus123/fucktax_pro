@@ -1,4 +1,9 @@
 import {
+  chatCompletionsWithRetry,
+  getExtractionModel,
+  waitForOpenAiThrottle,
+} from "@/lib/openai-client";
+import {
   buildExtractionUserPrompt,
   EXTRACTION_SYSTEM_PROMPT,
 } from "@/lib/process/prompt";
@@ -48,7 +53,7 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   const parser = new PDFParse({ data: buffer });
   const result = await parser.getText();
   await parser.destroy();
-  return result.text.slice(0, 14000);
+  return result.text.slice(0, 9000);
 }
 
 async function extractPdfPageImages(buffer: Buffer, maxPages = 2): Promise<string[]> {
@@ -229,32 +234,33 @@ function normalizeExtraction(parsed: Record<string, unknown>): DocumentExtractio
 
 async function callOpenAi(
   messages: Array<Record<string, unknown>>,
-  model: string,
+  model?: string,
 ): Promise<DocumentExtraction | null> {
-  const apiKey = getOpenAiKey();
-  if (!apiKey) return null;
+  if (!getOpenAiKey()) return null;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages,
-    }),
-  });
+  const extractionModel = model ?? getExtractionModel();
 
-  if (!response.ok) return null;
+  try {
+    const response = await chatCompletionsWithRetry(
+      {
+        model: extractionModel,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages,
+      },
+      { maxRetries: 6 },
+    );
 
-  const payload = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const raw = payload.choices?.[0]?.message?.content ?? "{}";
-  return normalizeExtraction(JSON.parse(raw) as Record<string, unknown>);
+    if (!response.ok) return null;
+
+    const payload = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const raw = payload.choices?.[0]?.message?.content ?? "{}";
+    return normalizeExtraction(JSON.parse(raw) as Record<string, unknown>);
+  } catch {
+    return null;
+  }
 }
 
 async function extractWithOpenAi(
@@ -296,7 +302,6 @@ async function extractWithOpenAi(
           ],
         },
       ],
-      "gpt-4o",
     );
     return result ?? { ...guessFromFilename(filename), warning: "AI vision failed" };
   }
@@ -323,7 +328,6 @@ async function extractWithOpenAi(
             ),
           },
         ],
-        "gpt-4o",
       );
       if (textResult?.gross_amount != null || textResult?.net_amount != null) {
         return textResult;
@@ -356,7 +360,6 @@ async function extractWithOpenAi(
               ],
             },
           ],
-          "gpt-4o",
         );
         if (visionResult) {
           if (visionResult.gross_amount != null || visionResult.net_amount != null) {

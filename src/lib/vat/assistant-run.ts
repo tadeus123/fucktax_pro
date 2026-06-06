@@ -87,7 +87,7 @@ export async function runAssistantWithTools(
   let elsterUpdated = false;
   let vatPayable: number | undefined;
   const toolDetails: ToolCallLog[] = [];
-  const maxRounds = 8;
+  const maxRounds = 5;
 
   for (let round = 0; round < maxRounds; round += 1) {
     onStatus?.(

@@ -284,7 +284,7 @@ export async function POST(request: NextRequest) {
 
       const result = await runAssistantWithTools(
         `${VAT_ASSISTANT_SYSTEM_PROMPT}\n\n--- CURRENT FILING DATA ---\n${context}`,
-        history.filter((m) => m.role !== "system").slice(-12),
+        history.filter((m) => m.role !== "system").slice(-6),
         filingPeriodId,
         emit ? (status) => emit({ type: "status", message: status }) : undefined,
       );
