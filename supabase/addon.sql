@@ -157,5 +157,6 @@ insert into public.company_lines (section_id, kind, value, sort_order) values
   (7, 'data', 'Tadeus Mehl & Konstantin Saifoulline · 50/50', 2),
   (7, 'data', 'Share capital 25,000 EUR', 3),
   (7, 'data', 'Finanzamt Dresden Nord · BFN 3202', 4),
-  (7, 'data', 'Finom · DE93 1001 8000 0392 6629 11', 5),
-  (7, 'data', 'BIC FNOMDEB2', 6);
+  (7, 'data', 'Mein ELSTER · HUGEProduction', 5),
+  (7, 'data', 'Finom · DE93 1001 8000 0392 6629 11', 6),
+  (7, 'data', 'BIC FNOMDEB2', 7);
