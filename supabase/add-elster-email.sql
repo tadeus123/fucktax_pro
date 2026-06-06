@@ -11,7 +11,7 @@ where section_id = 7
   );
 
 insert into public.company_lines (section_id, kind, value, sort_order)
-select 7, 'data', 'Mein ELSTER · invite@hugeconversations.com', 6
+select 7, 'data', 'Mein ELSTER Login Email · invite@hugeconversations.com', 6
 where not exists (
   select 1 from public.company_lines
   where section_id = 7 and value ilike '%invite@hugeconversations.com%'
