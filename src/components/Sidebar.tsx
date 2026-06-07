@@ -89,14 +89,6 @@ export function Sidebar({ filings }: { filings: SidebarFiling[] }) {
 
       <div className="space-y-1">
         <Link
-          href="/chat-analysis"
-          className={`block py-1.5 text-[11px] transition ${
-            pathname === "/chat-analysis" ? "text-zinc-400" : "text-zinc-700 hover:text-zinc-500"
-          }`}
-        >
-          chat analysis
-        </Link>
-        <Link
           href="/company"
           className={`block py-1.5 text-[11px] transition ${
             pathname === "/company" ? "text-zinc-400" : "text-zinc-700 hover:text-zinc-500"
