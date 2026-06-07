@@ -44,6 +44,27 @@ function NavLink({
   );
 }
 
+function NavLinkPlain({
+  href,
+  label,
+  active,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`block py-1.5 text-[13px] transition ${
+        active ? "text-white" : "text-zinc-600 hover:text-zinc-400"
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export function Sidebar({ filings }: { filings: SidebarFiling[] }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -83,8 +104,21 @@ export function Sidebar({ filings }: { filings: SidebarFiling[] }) {
                 active={pathname === filing.href}
               />
             ))}
+            <NavLinkPlain
+              href="/xbrl"
+              label="generate XBRL"
+              active={pathname === "/xbrl" || pathname.startsWith("/xbrl/")}
+            />
           </div>
-        ) : null}
+        ) : (
+          <div className="space-y-1 border-t border-zinc-900 pt-4">
+            <NavLinkPlain
+              href="/xbrl"
+              label="generate XBRL"
+              active={pathname === "/xbrl" || pathname.startsWith("/xbrl/")}
+            />
+          </div>
+        )}
       </nav>
 
       <div className="space-y-1">
